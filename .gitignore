@@ -82,12 +82,31 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+!.env.example
+
+# Local configuration files that might contain credentials
+*_local.json
+*_local.ini
+*_local.yaml
+*_local.yml
+*_local.config
+local_config.*
+*_credentials.*
+*_secret.*
+secrets.*
+
+# Credential caches and tokens
+.credentials/
+.tokens/
+.cookie/
+.auth/
+.secret/
 
 # Jupyter Notebooks
 .ipynb_checkpoints

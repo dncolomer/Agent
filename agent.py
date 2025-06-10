@@ -24,13 +24,14 @@ class Agent:
     creating development plans, and executing them step by step.
     """
     
-    def __init__(self, project_dir: str, plan_file: str = "development_plan.md"):
+    def __init__(self, project_dir: str, plan_file: str = "development_plan.md", model_name: Optional[str] = None):
         """
         Initialize the Agent.
         
         Args:
             project_dir: Directory where the project will be developed
             plan_file: Filename for the development plan
+            model_name: Name of the language model to use (defaults to environment variable)
         """
         self.logger = logging.getLogger(__name__)
         self.project_dir = project_dir
@@ -39,7 +40,7 @@ class Agent:
         self.plan_steps = []
         
         # Initialize LLM interface and project executor
-        self.llm = LLMInterface()
+        self.llm = LLMInterface(model_name=model_name)
         self.executor = ProjectExecutor(project_dir)
         
         self.logger.info(f"Agent initialized with project directory: {project_dir}")
