@@ -10,6 +10,7 @@ import logging
 import json
 import os
 import time
+import re
 from typing import Dict, List, Optional, Union, Any
 
 import requests
@@ -360,6 +361,16 @@ class LLMInterface:
         - commands_to_run: (Optional) List of commands to run
         """
         
+        # Using a raw string for the JSON template to avoid backslash issues
+        json_template = r'''
+        {
+          "files_to_create": ["path/to/file1.py", "path/to/file2.py"],
+          "files_to_modify": ["path/to/existing.py"],
+          "implementation_details": "Detailed description of what to implement",
+          "commands_to_run": ["pip install package", "pytest tests/"]
+        }
+        '''
+        
         llm_prompt = f"""
         Plan the implementation for the following development step:
         
@@ -369,12 +380,7 @@ class LLMInterface:
         
         Analyze the current step and existing files, then provide a detailed implementation plan.
         Return ONLY a valid JSON object with the following structure:
-        {{
-          "files_to_create": ["path/to/file1.py", "path/to/file2.py"],
-          "files_to_modify": ["path/to/existing.py"],
-          "implementation_details": "Detailed description of what to implement",
-          "commands_to_run": ["pip install package", "pytest tests/"]
-        }}
+        {json_template}
         
         The "commands_to_run" field is optional. Include it only if necessary.
         Do not include any explanations or text outside the JSON object.
@@ -439,39 +445,63 @@ class LLMInterface:
         # Determine file type from extension
         file_extension = file_path.split('.')[-1] if '.' in file_path else ''
         
-        # Create a specialized prompt for the LLM
+        # Create a specialized prompt for the LLM that explicitly requests pure code output
         system_prompt = f"""
-        You are an expert software developer. Your task is to generate code for a {file_extension} file.
+        You are an expert software developer tasked with generating clean, production-ready code.
         
-        The code should:
-        1. Be complete, functional, and ready to use
-        2. Follow best practices for the language and file type
-        3. Include appropriate comments and documentation
-        4. Implement the requested functionality exactly as described
+        IMPORTANT INSTRUCTIONS:
+        1. Output ONLY the raw code without any markdown formatting, code blocks, or explanatory text
+        2. Do not include any text like "```python", "```", or language identifiers
+        3. Do not include any explanations, comments about the code, or notes outside the actual code
+        4. Start your response with the actual code - no preamble or introduction
+        5. The code should be complete, functional, and follow best practices for {file_extension} files
+        6. Include appropriate comments and documentation within the code itself
+        7. Implement the requested functionality exactly as described
+        
+        Your entire response will be directly saved to a file, so it must contain ONLY valid {file_extension} code.
         """
+        
+        # Fix the f-string backslash issue by using string concatenation
+        existing_content_text = 'EXISTING CONTENT:\n' + existing_content if existing_content else 'This is a new file.'
         
         llm_prompt = f"""
         Generate code for the following file: {file_path}
         
         IMPLEMENTATION DETAILS: {implementation_details}
         
-        {'EXISTING CONTENT:\n' + existing_content if existing_content else 'This is a new file.'}
+        {existing_content_text}
         
-        Generate complete, working code for this file. Include appropriate comments, error handling,
-        and follow best practices for the file type.
+        IMPORTANT: Output ONLY the raw code without any markdown formatting or explanatory text.
+        Do not include ```python or ``` markers. Your response will be directly saved as {file_path}.
         
-        If modifying existing content, preserve the overall structure and functionality while making
-        the necessary changes to implement the requested features.
+        Include appropriate comments, error handling, and follow best practices for the file type.
+        If modifying existing content, preserve the overall structure while making the necessary changes.
         """
         
-        # Get response from LLM
+        # Get response from LLM with increased token limit for code
         response = self.generate_text(
             prompt=llm_prompt,
             system_prompt=system_prompt,
             max_tokens=4000  # Larger token limit for code generation
         )
         
-        # Process the response to extract the code
+        # Clean up the response to extract pure code
+        code = self._clean_code_response(response, file_extension)
+        
+        return code
+    
+    def _clean_code_response(self, response: str, file_extension: str) -> str:
+        """
+        Clean up the LLM response to extract pure code.
+        
+        Args:
+            response: The raw response from the LLM
+            file_extension: The file extension (e.g., 'py', 'js')
+            
+        Returns:
+            Clean code as a string
+        """
+        # Remove any markdown code blocks
         code = response
         
         # If the response contains markdown code blocks, extract just the code
@@ -479,8 +509,8 @@ class LLMInterface:
             # Try to extract code from a code block with language specifier
             language_blocks = [f"```{file_extension}", "```python", "```javascript", "```html", "```css", "```java", "```c"]
             for lang_block in language_blocks:
-                if lang_block in response.lower():
-                    parts = response.lower().split(lang_block, 1)
+                if lang_block.lower() in response.lower():
+                    parts = response.lower().split(lang_block.lower(), 1)
                     if len(parts) > 1:
                         code = parts[1].split("```", 1)[0].strip()
                         break
@@ -493,7 +523,24 @@ class LLMInterface:
                     
                     # If the first line looks like a language specifier, remove it
                     lines = code.split("\n")
-                    if len(lines) > 0 and lines[0].strip() in ["python", "javascript", "html", "css", "java", "c", "json"]:
+                    if len(lines) > 0 and lines[0].strip().lower() in ["python", "javascript", "html", "css", "java", "c", "json"]:
                         code = "\n".join(lines[1:])
+        
+        # Remove common artifacts at the beginning of the file
+        artifacts = ["thon", "python", "js", "javascript", "html", "css", "java", "c", "json"]
+        for artifact in artifacts:
+            if code.lower().startswith(artifact):
+                code = code[len(artifact):].lstrip()
+        
+        # Remove any leading/trailing whitespace
+        code = code.strip()
+        
+        # For Python files, ensure proper shebang if it's missing
+        if file_extension == 'py' and not code.startswith("#!/") and not code.startswith("#!"):
+            code = f"#!/usr/bin/env python3\n{code}"
+        
+        # For shell scripts, ensure proper shebang
+        if file_extension == 'sh' and not code.startswith("#!/"):
+            code = f"#!/bin/bash\n{code}"
         
         return code

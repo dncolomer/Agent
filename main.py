@@ -73,6 +73,16 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         default=".env",
         help="Path to environment file (.env)"
     )
+    parser.add_argument(
+        "--simple",
+        action="store_true",
+        help="Use simple mode for basic projects (skips multi-step planning)"
+    )
+    parser.add_argument(
+        "--main-file",
+        default="main.py",
+        help="Name of the main file to create in simple mode"
+    )
     
     return parser.parse_args(args)
 
@@ -132,14 +142,35 @@ def main(args: Optional[List[str]] = None) -> int:
         
         # If a prompt was provided, run the agent
         if parsed_args.prompt:
-            success = agent.run(parsed_args.prompt)
-            if success:
-                logger.info("Project development completed successfully")
-                print("\nProject development completed! Please test the implementation.")
-                print(f"Project files are located in: {project_dir}")
+            if parsed_args.simple:
+                # Use simple mode for basic projects
+                logger.info(f"Running in simple mode to create {parsed_args.main_file}")
+                success, file_content = agent.simple_run(
+                    parsed_args.prompt,
+                    parsed_args.main_file
+                )
+                
+                if success:
+                    logger.info("File created successfully")
+                    print(f"\nFile created successfully: {os.path.join(project_dir, parsed_args.main_file)}")
+                    print("\nFile content:")
+                    print("-" * 40)
+                    print(file_content[:500] + "..." if len(file_content) > 500 else file_content)
+                    print("-" * 40)
+                    return 0
+                else:
+                    logger.error("Failed to create file")
+                    return 1
             else:
-                logger.error("Project development failed")
-                return 1
+                # Use full workflow for complex projects
+                success = agent.run(parsed_args.prompt)
+                if success:
+                    logger.info("Project development completed successfully")
+                    print("\nProject development completed! Please test the implementation.")
+                    print(f"Project files are located in: {project_dir}")
+                else:
+                    logger.error("Project development failed")
+                    return 1
         else:
             logger.info("No prompt provided. Use --prompt to specify what to build.")
             print("Please provide a prompt describing what you want to build using the --prompt option.")

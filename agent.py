@@ -8,9 +8,10 @@ for understanding user requests, creating development plans, and executing them.
 
 import os
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import datetime
 import time
+import re
 
 from llm_interface import LLMInterface
 from project_executor import ProjectExecutor
@@ -42,6 +43,9 @@ class Agent:
         # Initialize LLM interface and project executor
         self.llm = LLMInterface(model_name=model_name)
         self.executor = ProjectExecutor(project_dir)
+        
+        # Create project directory if it doesn't exist
+        os.makedirs(project_dir, exist_ok=True)
         
         self.logger.info(f"Agent initialized with project directory: {project_dir}")
     
@@ -83,11 +87,65 @@ class Agent:
             self.logger.warning(f"Plan had {len(steps)} steps, truncating to 10")
             steps = steps[:10]
         
-        # Save the plan to a file
-        self._save_plan_to_file(steps)
+        # Adapt steps to work with our project structure
+        adapted_steps = [self._adapt_step(step) for step in steps]
         
-        self.plan_steps = steps
-        return steps
+        # Save the plan to a file
+        self._save_plan_to_file(adapted_steps)
+        
+        self.plan_steps = adapted_steps
+        return adapted_steps
+    
+    def _adapt_step(self, step: str) -> str:
+        """
+        Adapt a step to work with the provided project directory.
+        
+        This method analyzes steps that involve directory creation or navigation
+        and modifies them to work with our project structure.
+        
+        Args:
+            step: The original step description
+            
+        Returns:
+            The adapted step description
+        """
+        # Skip adaptation for steps that are already marked as done
+        if step.startswith("[DONE]"):
+            return step
+            
+        # Replace generic directory creation with project-specific instructions
+        dir_creation_patterns = [
+            r"create (?:a )?(?:new )?directory",
+            r"mkdir",
+            r"make (?:a )?(?:new )?directory"
+        ]
+        
+        for pattern in dir_creation_patterns:
+            if re.search(pattern, step.lower()):
+                # Extract the directory name if possible
+                dir_match = re.search(r"(?:called|named) ['\"](.*?)['\"]", step)
+                if dir_match:
+                    dir_name = dir_match.group(1)
+                    return f"Create directory '{dir_name}' in the project"
+                else:
+                    return f"Set up project structure in {os.path.basename(self.project_dir)}"
+        
+        # Adapt steps that involve navigating to directories
+        nav_patterns = [
+            r"navigate (?:in)?to",
+            r"cd ",
+            r"change directory"
+        ]
+        
+        for pattern in nav_patterns:
+            if re.search(pattern, step.lower()):
+                return f"Work within the project directory {os.path.basename(self.project_dir)}"
+        
+        # Adapt environment setup steps
+        if "virtual environment" in step.lower() or "venv" in step.lower():
+            return "Set up development environment"
+            
+        return step
     
     def execute_step(self, step_index: int) -> bool:
         """
@@ -129,7 +187,7 @@ class Agent:
     
     def _execute_implementation_plan(self, plan: Dict[str, Any]) -> bool:
         """
-        Execute an implementation plan.
+        Execute an implementation plan with improved error handling.
         
         Args:
             plan: The implementation plan from the LLM
@@ -137,38 +195,92 @@ class Agent:
         Returns:
             True if the plan was executed successfully, False otherwise
         """
+        # Track success of operations
+        all_operations_succeeded = True
+        failed_operations = []
+        
         # Create new files
         for file_path in plan.get('files_to_create', []):
-            content = self.llm.generate_code(
-                file_path=file_path,
-                implementation_details=plan.get('implementation_details', '')
-            )
-            if not self.executor.create_file(file_path, content):
-                return False
+            try:
+                content = self.llm.generate_code(
+                    file_path=file_path,
+                    implementation_details=plan.get('implementation_details', '')
+                )
+                
+                # Validate generated content
+                if not content or len(content.strip()) < 10:
+                    self.logger.warning(f"Generated content for {file_path} seems too short or empty")
+                    # Try one more time with more specific instructions
+                    content = self.llm.generate_code(
+                        file_path=file_path,
+                        implementation_details=f"Create a complete, working {file_path} file that implements: {plan.get('implementation_details', '')}"
+                    )
+                
+                # Create the file
+                if not self.executor.create_file(file_path, content):
+                    self.logger.error(f"Failed to create file: {file_path}")
+                    all_operations_succeeded = False
+                    failed_operations.append(f"Create {file_path}")
+            except Exception as e:
+                self.logger.exception(f"Error creating file {file_path}: {e}")
+                all_operations_succeeded = False
+                failed_operations.append(f"Create {file_path}")
         
         # Modify existing files
         for file_path in plan.get('files_to_modify', []):
-            existing_content = self.executor.read_file(file_path)
-            if existing_content is None:
-                self.logger.error(f"Cannot modify non-existent file: {file_path}")
-                return False
-            
-            new_content = self.llm.generate_code(
-                file_path=file_path,
-                implementation_details=plan.get('implementation_details', ''),
-                existing_content=existing_content
-            )
-            if not self.executor.modify_file(file_path, new_content):
-                return False
+            try:
+                existing_content = self.executor.read_file(file_path)
+                if existing_content is None:
+                    self.logger.error(f"Cannot modify non-existent file: {file_path}")
+                    all_operations_succeeded = False
+                    failed_operations.append(f"Modify {file_path}")
+                    continue
+                
+                new_content = self.llm.generate_code(
+                    file_path=file_path,
+                    implementation_details=plan.get('implementation_details', ''),
+                    existing_content=existing_content
+                )
+                
+                # Validate the modified content
+                if not new_content or len(new_content.strip()) < 10:
+                    self.logger.warning(f"Modified content for {file_path} seems too short or empty")
+                    # Keep the original content instead
+                    self.logger.info(f"Keeping original content for {file_path}")
+                    continue
+                
+                if not self.executor.modify_file(file_path, new_content):
+                    self.logger.error(f"Failed to modify file: {file_path}")
+                    all_operations_succeeded = False
+                    failed_operations.append(f"Modify {file_path}")
+            except Exception as e:
+                self.logger.exception(f"Error modifying file {file_path}: {e}")
+                all_operations_succeeded = False
+                failed_operations.append(f"Modify {file_path}")
         
         # Run any specified commands
         for command in plan.get('commands_to_run', []):
-            return_code, stdout, stderr = self.executor.run_command(command)
-            if return_code != 0:
-                self.logger.error(f"Command failed: {command}\nError: {stderr}")
-                return False
+            try:
+                # Skip potentially problematic commands
+                if "cd " in command or "mkdir" in command:
+                    self.logger.warning(f"Skipping directory manipulation command: {command}")
+                    continue
+                    
+                return_code, stdout, stderr = self.executor.run_command(command)
+                if return_code != 0:
+                    self.logger.error(f"Command failed: {command}\nError: {stderr}")
+                    all_operations_succeeded = False
+                    failed_operations.append(f"Run command: {command}")
+            except Exception as e:
+                self.logger.exception(f"Error running command {command}: {e}")
+                all_operations_succeeded = False
+                failed_operations.append(f"Run command: {command}")
         
-        return True
+        # Log failed operations
+        if failed_operations:
+            self.logger.warning(f"The following operations failed: {', '.join(failed_operations)}")
+            
+        return all_operations_succeeded
     
     def update_plan(self, step_index: int, status: str = "DONE") -> bool:
         """
@@ -225,7 +337,9 @@ class Agent:
             success = self.execute_step(i)
             if not success:
                 self.logger.error(f"Failed to execute step {i + 1}")
-                return False
+                # Try to continue with the next step instead of failing completely
+                self.update_plan(i, "FAILED")
+                continue
             
             # Update the plan to mark the step as done
             self.update_plan(i)
@@ -233,8 +347,63 @@ class Agent:
             # Small delay between steps for readability
             time.sleep(1)
         
-        self.logger.info("Project development completed successfully")
-        return True
+        # Check if any steps failed
+        failed_steps = sum(1 for step in self.plan_steps if "[FAILED]" in step)
+        if failed_steps > 0:
+            self.logger.warning(f"Project completed with {failed_steps} failed steps")
+            print(f"\nProject completed with {failed_steps} failed steps. Please check the plan file.")
+        else:
+            self.logger.info("Project development completed successfully")
+        
+        return failed_steps == 0
+    
+    def simple_run(self, user_prompt: str, main_file: str) -> Tuple[bool, str]:
+        """
+        Run a simplified workflow for very basic projects.
+        
+        This method skips the multi-step planning process and directly generates
+        the requested file based on the user prompt.
+        
+        Args:
+            user_prompt: The user's description of what they want to build
+            main_file: The main file to create (e.g., "hello.py")
+            
+        Returns:
+            Tuple of (success, file_content)
+        """
+        self.logger.info(f"Starting simple workflow to create {main_file}")
+        
+        # Create a simple plan
+        plan_content = f"# Simple Development Plan\n\n"
+        plan_content += f"Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        plan_content += f"1. Create {main_file} file that implements the requested functionality\n"
+        
+        # Save the simple plan
+        self.executor.create_file(self.plan_file, plan_content)
+        
+        # Generate the file content
+        try:
+            file_content = self.llm.generate_code(
+                file_path=main_file,
+                implementation_details=user_prompt
+            )
+            
+            # Create the file
+            if self.executor.create_file(main_file, file_content):
+                self.logger.info(f"Successfully created {main_file}")
+                
+                # Update the plan to mark the step as done
+                plan_content = plan_content.replace(f"1. Create {main_file}", f"1. [DONE] Create {main_file}")
+                self.executor.modify_file(self.plan_file, plan_content)
+                
+                return True, file_content
+            else:
+                self.logger.error(f"Failed to create {main_file}")
+                return False, ""
+                
+        except Exception as e:
+            self.logger.exception(f"Error in simple_run: {e}")
+            return False, ""
     
     def _save_plan_to_file(self, steps: List[str]) -> None:
         """Save the development plan to a file."""
@@ -250,13 +419,15 @@ class Agent:
         plan_content += "- [x] Plan created\n"
         
         # Update progress markers based on completed steps
-        done_steps = sum(1 for step in steps if step.startswith("[DONE]"))
-        if done_steps > 0:
+        done_steps = sum(1 for step in steps if "[DONE]" in step)
+        failed_steps = sum(1 for step in steps if "[FAILED]" in step)
+        
+        if done_steps > 0 or failed_steps > 0:
             plan_content += "- [x] Implementation started\n"
         else:
             plan_content += "- [ ] Implementation started\n"
         
-        if done_steps == len(steps):
+        if done_steps + failed_steps == len(steps):
             plan_content += "- [x] Implementation completed\n"
             plan_content += "- [ ] Testing requested\n"
         else:
