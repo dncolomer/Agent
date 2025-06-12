@@ -1,7 +1,17 @@
-# Agent
+# Agent Toolkit
 
-A modular prototype **coding-assistant agent** that turns natural-language prompts into fully-scaffolded software projects.  
-The project’s goal is to explore an *LLM-first* workflow in which the agent plans, writes, and iteratively updates code until a working deliverable is ready for the user to test.
+**Agent Toolkit** is a configuration-driven, *multi-agent* orchestration system.  
+Instead of a single monolithic assistant, the Toolkit spins-up specialised
+Builder, Verifier and Operator agents that collaborate to:
+
+* generate code or infrastructure from a high-level spec,
+* automatically verify the result with tests / static analysis, and
+* run or monitor the artefacts in an operational loop.
+
+Everything is controlled through a single YAML/JSON/TOML configuration file
+(see `examples/config.yaml`). A CLI (`agentctl`) then reads the config, launches
+the requested agents and streams **structured JSON logs** so you can follow the
+process in real-time or pipe it to your observability stack.
 
 ---
 
@@ -19,15 +29,38 @@ The project’s goal is to explore an *LLM-first* workflow in which the agent pl
 ---
 
 ## Key Capabilities
-- **Prompt Understanding** – Parses the user’s description to identify project type, essential features, and technologies.  
-- **Autonomous Planning** – Produces a development plan in ≤ 10 actionable steps and saves it to `development_plan.md`.  
-- **Step-wise Execution** – For each TODO the agent independently:
-  1. Re-plans the specific task with the LLM  
-  2. Decides which files to create / update  
-  3. Generates or edits code via the LLM  
-  4. Marks the step as **DONE** in the plan  
-- **File System Safety** – All file operations are routed through `ProjectExecutor`, providing backups and basic command-sanitisation.  
-- **Pluggable LLM Layer** – `LLMInterface` is an adapter; swap in any provider by replacing a single class.  
+- **Config-Driven Orchestration** – One declarative file defines how many agents
+  to launch, which LLM models to use, budget / time caps, verification strategy,
+  deployment runtime, log sinks, and more.  
+- **Specialised Agent Pools**
+  - **Builder Agents** – synthesise code, infra or data assets  
+  - **Verifier Agents** – run unit / integration / performance / security tests  
+  - **Operator Agents** – deploy or run the artefacts and watch health metrics  
+- **Resource Governance** – central tracker enforces token/cost/time budgets and
+  raises structured `resource.limit.*` events when thresholds are hit.  
+- **Structured Logging** – every significant event is emitted as NDJSON
+  (timestamp, level, module, message, payload) so it can be shipped straight to
+  ELK/Grafana/Datadog.  
+- **Pluggable LLM Backend** – the `LLMInterface` adapter lets you swap
+  OpenRouter, Azure OpenAI, Vertex AI, etc., without touching agent logic.  
+- **Extensible** – add new agent types, verification stages or log sinks via a
+  clean plugin interface.
+
+---
+
+## Agent Types
+
+| Type | Responsibility | Typical Skills |
+|------|----------------|----------------|
+| **Builder** | Generate code / infra from spec | Code synthesis, templating, doc-gen |
+| **Verifier** | Validate artefacts meet quality & policy | Test-gen, static analysis, perf / sec scanners |
+| **Operator** | Run, monitor and heal the system | CLI / API automation, schedulers, alerting |
+
+All inherit from a common `BaseAgent` that provides:
+* async inbox/outbox on an internal event-bus  
+* cost / token accounting hooks  
+* structured logger instance  
+* graceful-shutdown handler  
 
 ---
 

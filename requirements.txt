@@ -4,6 +4,9 @@ python-dotenv>=1.0.0
 pydantic>=2.4.2  # Used for data validation and configuration management
 click>=8.1.7
 
+# JSON Schema validation
+jsonschema>=4.17.0  # For validating configuration files against schema
+
 # AI and NLP - for LLM interface
 transformers>=4.34.0  # For LLM integration
 nltk>=3.8.1  # Natural language processing capabilities
@@ -11,7 +14,7 @@ spacy>=3.7.2  # Alternative NLP toolkit
 
 # Async capabilities
 aiohttp>=3.8.5  # For async HTTP requests
-asyncio>=3.4.3  # For async operations
+# asyncio is part of the Python standard library (>=3.4), no need to list
 
 # Utilities
 tqdm>=4.66.1  # Progress bars

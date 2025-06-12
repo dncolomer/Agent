@@ -1,0 +1,132 @@
+# Agent Toolkit Configuration Example
+# This configuration file demonstrates the major features and options
+# available in the Agent Toolkit.
+
+# Project metadata
+project:
+  name: e-commerce-recommendation-engine
+  description: >
+    A machine learning-based product recommendation engine for e-commerce
+    platforms that analyzes user behavior and purchase history to provide
+    personalized product suggestions.
+  version: 0.1.0
+  tags:
+    - machine-learning
+    - e-commerce
+    - python
+    - api
+
+# Builder agents configuration
+build:
+  agents:
+    count: 3  # Use multiple builder agents for parallel work
+    model: openai/gpt-4o  # High-capability model for complex code generation
+    max_cost_usd: 8.50  # Budget constraint
+    max_runtime_min: 45  # Time constraint
+    temperature: 0.3  # Lower temperature for more deterministic output
+  
+  constraints:
+    max_files: 25  # Limit project complexity
+    allowed_languages:
+      - python
+      - javascript
+      - sql
+    target_directory: ./recommendation-engine
+    dependencies:
+      python:
+        - scikit-learn>=1.2.0
+        - pandas>=2.0.0
+        - fastapi>=0.95.0
+      javascript:
+        - react>=18.0.0
+        - axios>=1.3.0
+
+# Verifier agents configuration
+verify:
+  strategy: gated  # Block promotion until tests pass
+  agents:
+    count: 2
+    model: anthropic/claude-3-sonnet  # Different model for verification
+    temperature: 0.1  # Lower temperature for more rigorous checking
+  
+  tests:
+    - type: unit
+      path: tests/unit/
+      timeout_sec: 120
+    - type: integration
+      path: tests/integration/
+      timeout_sec: 300
+    - type: performance
+      target_rps: 500
+      timeout_sec: 600
+    - type: security
+      custom_command: "bandit -r ./recommendation-engine"
+      timeout_sec: 180
+  
+  thresholds:
+    min_test_coverage: 85.0
+    max_critical_issues: 0
+    max_warning_issues: 5
+    performance:
+      p95_latency_ms: 200
+      max_memory_mb: 512
+
+# Operator agents configuration
+operate:
+  runtime: docker
+  operator_agents:
+    count: 1
+    model: openai/gpt-4o-mini  # Lighter model for operational tasks
+  
+  monitoring:
+    interval_sec: 30
+    metrics:
+      - cpu_usage
+      - memory_usage
+      - request_latency
+      - error_rate
+    alert_threshold:
+      cpu_usage: 80.0  # Percentage
+      memory_usage: 75.0  # Percentage
+      request_latency: 500  # Milliseconds
+      error_rate: 1.0  # Percentage
+  
+  deployment:
+    strategy: canary
+    auto_rollback: true
+    stages:
+      - name: dev
+        percentage: 10
+        duration_min: 15
+      - name: staging
+        percentage: 25
+        duration_min: 30
+      - name: production
+        percentage: 100
+
+# Logging configuration
+logging:
+  level: info
+  format: json  # Structured logging for machine readability
+  sink:
+    type: file
+    path: logs/agent-toolkit.ndjson
+    rotation:
+      max_size_mb: 50
+      max_files: 10
+  
+  # Optional additional log targets
+  additional_sinks:
+    - type: stdout  # Also log to console
+      format: pretty  # Human-readable format
+    - type: http
+      url: "https://logging-service.example.com/ingest"
+      headers:
+        Authorization: "Bearer ${LOG_API_TOKEN}"  # Environment variable reference
+
+# Advanced features
+features:
+  enable_memory: true  # Enable shared memory between agents
+  checkpoint_interval_min: 5  # Create recovery points every 5 minutes
+  parallel_execution: true  # Allow agents to work in parallel when possible
+  interactive_mode: false  # Run without user intervention

@@ -1,0 +1,341 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Toolkit Configuration Schema",
+  "description": "Configuration schema for the Agent Toolkit, defining builder, verifier, and operator agents",
+  "type": "object",
+  "required": ["project", "build"],
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Project metadata and general information",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the project",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what the project aims to build"
+        },
+        "version": {
+          "type": "string",
+          "description": "Version of the project",
+          "pattern": "^[0-9]+(\\.[0-9]+)*$"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Tags to categorize the project",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "description": "Configuration for builder agents that generate code and artifacts",
+      "required": ["agents"],
+      "properties": {
+        "agents": {
+          "type": "object",
+          "description": "Builder agent pool configuration",
+          "required": ["count"],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "description": "Number of builder agents to instantiate",
+              "minimum": 1,
+              "default": 1
+            },
+            "model": {
+              "type": "string",
+              "description": "LLM model to use for builder agents",
+              "default": "openai/gpt-4-turbo-preview"
+            },
+            "max_cost_usd": {
+              "type": "number",
+              "description": "Maximum cost in USD for all builder agents combined",
+              "minimum": 0,
+              "default": 10.0
+            },
+            "max_runtime_min": {
+              "type": "integer",
+              "description": "Maximum runtime in minutes for builder agents",
+              "minimum": 1,
+              "default": 60
+            },
+            "temperature": {
+              "type": "number",
+              "description": "Temperature setting for LLM generation",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.7
+            }
+          }
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Additional constraints for the build process",
+          "properties": {
+            "max_files": {
+              "type": "integer",
+              "description": "Maximum number of files to generate",
+              "minimum": 1
+            },
+            "allowed_languages": {
+              "type": "array",
+              "description": "Programming languages allowed for code generation",
+              "items": {
+                "type": "string"
+              }
+            },
+            "target_directory": {
+              "type": "string",
+              "description": "Directory where generated files will be stored",
+              "default": "./output"
+            }
+          }
+        }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "description": "Configuration for verifier agents that test and validate the built artifacts",
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "description": "Strategy for running verification",
+          "enum": ["sequential", "parallel", "gated"],
+          "default": "sequential"
+        },
+        "agents": {
+          "type": "object",
+          "description": "Verifier agent pool configuration",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "description": "Number of verifier agents to instantiate",
+              "minimum": 0,
+              "default": 1
+            },
+            "model": {
+              "type": "string",
+              "description": "LLM model to use for verifier agents",
+              "default": "openai/gpt-4-turbo-preview"
+            },
+            "temperature": {
+              "type": "number",
+              "description": "Temperature setting for LLM verification",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.2
+            }
+          }
+        },
+        "tests": {
+          "type": "array",
+          "description": "List of test configurations to run",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Type of test to run",
+                "enum": ["unit", "integration", "performance", "security", "custom"]
+              },
+              "path": {
+                "type": "string",
+                "description": "Path to test files or directory"
+              },
+              "target_rps": {
+                "type": "integer",
+                "description": "Target requests per second for performance tests",
+                "minimum": 1
+              },
+              "custom_command": {
+                "type": "string",
+                "description": "Custom command to run for custom test type"
+              },
+              "timeout_sec": {
+                "type": "integer",
+                "description": "Timeout in seconds for this test",
+                "minimum": 1,
+                "default": 300
+              }
+            }
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "description": "Thresholds for verification success",
+          "properties": {
+            "min_test_coverage": {
+              "type": "number",
+              "description": "Minimum test coverage percentage required",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 80
+            },
+            "max_critical_issues": {
+              "type": "integer",
+              "description": "Maximum number of critical issues allowed",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        }
+      }
+    },
+    "operate": {
+      "type": "object",
+      "description": "Configuration for operator agents that run and maintain the built system",
+      "properties": {
+        "runtime": {
+          "type": "string",
+          "description": "Target runtime environment",
+          "enum": ["docker", "k8s", "local", "aws", "gcp", "azure"],
+          "default": "local"
+        },
+        "operator_agents": {
+          "type": "object",
+          "description": "Operator agent pool configuration",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "description": "Number of operator agents to instantiate",
+              "minimum": 0,
+              "default": 1
+            },
+            "model": {
+              "type": "string",
+              "description": "LLM model to use for operator agents",
+              "default": "openai/gpt-4-turbo-preview"
+            }
+          }
+        },
+        "monitoring": {
+          "type": "object",
+          "description": "Monitoring configuration for operators",
+          "properties": {
+            "interval_sec": {
+              "type": "integer",
+              "description": "Monitoring interval in seconds",
+              "minimum": 1,
+              "default": 60
+            },
+            "metrics": {
+              "type": "array",
+              "description": "List of metrics to monitor",
+              "items": {
+                "type": "string"
+              }
+            },
+            "alert_threshold": {
+              "type": "object",
+              "description": "Thresholds for alerting",
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "deployment": {
+          "type": "object",
+          "description": "Deployment configuration",
+          "properties": {
+            "strategy": {
+              "type": "string",
+              "description": "Deployment strategy",
+              "enum": ["rolling", "blue-green", "canary"],
+              "default": "rolling"
+            },
+            "auto_rollback": {
+              "type": "boolean",
+              "description": "Whether to automatically rollback failed deployments",
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "Logging configuration for the toolkit",
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Logging level",
+          "enum": ["debug", "info", "warning", "error", "critical"],
+          "default": "info"
+        },
+        "format": {
+          "type": "string",
+          "description": "Log output format",
+          "enum": ["json", "pretty"],
+          "default": "json"
+        },
+        "sink": {
+          "type": "object",
+          "description": "Log sink configuration",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Type of log sink",
+              "enum": ["stdout", "file", "http"],
+              "default": "stdout"
+            },
+            "path": {
+              "type": "string",
+              "description": "File path for file sink type"
+            },
+            "url": {
+              "type": "string",
+              "description": "URL for http sink type",
+              "format": "uri"
+            },
+            "rotation": {
+              "type": "object",
+              "description": "Log rotation configuration for file sink",
+              "properties": {
+                "max_size_mb": {
+                  "type": "integer",
+                  "description": "Maximum log file size in MB before rotation",
+                  "minimum": 1,
+                  "default": 100
+                },
+                "max_files": {
+                  "type": "integer",
+                  "description": "Maximum number of rotated log files to keep",
+                  "minimum": 1,
+                  "default": 5
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": { "type": { "const": "file" } }
+              },
+              "then": {
+                "required": ["path"]
+              }
+            },
+            {
+              "if": {
+                "properties": { "type": { "const": "http" } }
+              },
+              "then": {
+                "required": ["url"]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
