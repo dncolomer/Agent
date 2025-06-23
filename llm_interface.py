@@ -12,6 +12,8 @@ import os
 import time
 import re
 from typing import Dict, List, Optional, Union, Any
+import uuid
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -49,6 +51,8 @@ class LLMInterface:
         if not self.api_key:
             self.logger.warning("OpenRouter API key not found. Please set OPENROUTER_API_KEY environment variable.")
         
+        # Track aggregated token usage for this interface instance
+        self.usage: Dict[str, int] = {"prompt": 0, "completion": 0, "total": 0}
         self.logger.info(f"Initialized LLM interface with model: {self.model_name}")
     
     def generate_text(self, prompt: str, max_tokens: int = 500, system_prompt: str = None) -> str:
@@ -66,7 +70,16 @@ class LLMInterface:
         Raises:
             RuntimeError: If API call fails or response cannot be parsed
         """
-        self.logger.debug(f"Generating text with prompt: {prompt[:50]}...")
+        request_id = uuid.uuid4().hex[:8]
+        start_ts = time.time()
+
+        # Log the full context (trimmed for very large prompts)
+        self.logger.debug(
+            f"[{request_id}] OpenRouter request -> "
+            f"model={self.model_name}, temp={self.temperature}, "
+            f"system_prompt_len={len(system_prompt) if system_prompt else 0}, "
+            f"user_prompt_preview={prompt[:120].replace(chr(10),' ')}"
+        )
         
         if not self.api_key:
             self.logger.error("Cannot generate text: OpenRouter API key not configured")
@@ -107,6 +120,8 @@ class LLMInterface:
                     timeout=30  # 30 second timeout
                 )
                 
+                elapsed = time.time() - start_ts
+                
                 # Check for HTTP errors
                 response.raise_for_status()
                 
@@ -114,6 +129,20 @@ class LLMInterface:
                 result = response.json()
                 
                 if "choices" in result and len(result["choices"]) > 0:
+                    # Track usage if provided
+                    usage = result.get("usage", {})
+                    prompt_toks = usage.get("prompt_tokens", 0)
+                    completion_toks = usage.get("completion_tokens", 0)
+                    total_toks = usage.get("total_tokens", 0)
+                    self.usage["prompt"] += prompt_toks
+                    self.usage["completion"] += completion_toks
+                    self.usage["total"] += total_toks
+
+                    self.logger.debug(
+                        f"[{request_id}] OpenRouter response <- "
+                        f"elapsed={elapsed:.2f}s, prompt_tokens={prompt_toks}, "
+                        f"completion_tokens={completion_toks}, total_tokens={total_toks}"
+                    )
                     return result["choices"][0]["message"]["content"]
                 else:
                     self.logger.error(f"Unexpected API response format: {result}")
@@ -135,7 +164,7 @@ class LLMInterface:
                 return f"[Error: HTTP error {response.status_code}]"
                 
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Request error: {e}")
+                self.logger.error(f"[{request_id}] Request error: {e}")
                 if attempt < max_retries - 1:
                     self.logger.warning(f"Request failed. Retrying in {retry_delay} seconds...")
                     time.sleep(retry_delay)
@@ -144,11 +173,11 @@ class LLMInterface:
                 return "[Error: Failed to connect to OpenRouter API]"
                 
             except json.JSONDecodeError:
-                self.logger.error("Failed to parse API response")
+                self.logger.error(f"[{request_id}] Failed to parse API response")
                 return "[Error: Invalid response from OpenRouter API]"
                 
             except Exception as e:
-                self.logger.exception(f"Unexpected error: {e}")
+                self.logger.exception(f"[{request_id}] Unexpected error: {e}")
                 return f"[Error: {str(e)}]"
         
         return "[Error: Maximum retries exceeded]"

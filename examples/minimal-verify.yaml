@@ -1,0 +1,67 @@
+# Minimal Build-Verify Configuration
+# This configuration demonstrates a basic interleaved build-verify workflow
+# with both builder and verifier agents working together.
+
+project:
+  name: minimal-verify-demo
+
+# Builder agents configuration
+build:
+  overarching_team_goal: >
+    Create a simple web API with basic CRUD operations for a task management 
+    application with proper error handling and documentation.
+  agents:
+    count: 2  # Keep it minimal
+    models:
+      - name: openai/gpt-4o
+        count: 1
+        temperature: 0.3
+        individual_agent_goal: >
+          Design the core API structure and implement the data models with
+          proper validation and error handling.
+      - name: anthropic/claude-3-haiku
+        count: 1
+        temperature: 0.4
+        individual_agent_goal: >
+          Implement the API endpoints and create comprehensive documentation
+          for the API usage.
+  constraints:
+    max_cost_usd: 2.00
+    max_runtime_min: 15
+    allowed_languages:
+      - python
+    target_directory: ./minimal-verify-output
+
+# Verifier agents configuration
+verify:
+  strategy: parallel  # This enables the interleaved workflow
+  agents:
+    count: 1
+    model: anthropic/claude-3-sonnet
+    temperature: 0.2  # Lower temperature for more rigorous verification
+    individual_agent_goal: >
+      Focus on identifying security vulnerabilities, enforcing code quality
+      standards, and ensuring adherence to best practices across the entire
+      codebase. Provide concise, actionable feedback to builders that
+      improves robustness, readability, and maintainability.
+  tests:
+    - type: unit
+      path: tests/
+      timeout_sec: 60
+  thresholds:
+    min_test_coverage: 70.0
+    max_critical_issues: 0
+
+# Logging configuration for debugging
+logging:
+  level: debug  # Enable detailed logging
+  format: json  # Structured logs for machine processing
+  sink:
+    type: file
+    path: logs/minimal-verify.ndjson
+    rotation:
+      max_size_mb: 10
+      max_files: 3
+  additional_sinks:
+    - type: stdout
+      format: pretty  # Human-readable format for console output

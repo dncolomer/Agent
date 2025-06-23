@@ -14,7 +14,6 @@ import logging
 import os
 import time
 import uuid
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -22,34 +21,15 @@ import jsonschema
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-# Import agent types (to be implemented in separate files)
-# from agent_toolkit.agents.base_agent import BaseAgent
-# from agent_toolkit.agents.builder import BuilderAgent
+# Import concrete agent implementations
+from agent_toolkit.agents import BaseAgent, BuilderAgent
 # from agent_toolkit.agents.verifier import VerifierAgent
 # from agent_toolkit.agents.operator import OperatorAgent
 
-# Temporarily define placeholder classes until the actual implementations are created
-class BaseAgent:
-    """Placeholder for the BaseAgent class."""
-    def __init__(self, agent_id: str, config: Dict[str, Any], event_bus: 'EventBus', logger: logging.Logger):
-        self.agent_id = agent_id
-        self.config = config
-        self.event_bus = event_bus
-        self.logger = logger
-        
-    async def start(self):
-        """Start the agent's execution."""
-        pass
-        
-    async def stop(self):
-        """Stop the agent's execution."""
-        pass
+# Import event primitives from dedicated module
+from agent_toolkit.events import EventType, Event, EventBus
 
-
-class BuilderAgent(BaseAgent):
-    """Placeholder for the BuilderAgent class."""
-    pass
-
+# --------------------------------------------------------------------------- #
 
 class VerifierAgent(BaseAgent):
     """Placeholder for the VerifierAgent class."""
@@ -59,104 +39,6 @@ class VerifierAgent(BaseAgent):
 class OperatorAgent(BaseAgent):
     """Placeholder for the OperatorAgent class."""
     pass
-
-
-class EventType(str, Enum):
-    """Event types for the event bus."""
-    # System events
-    SYSTEM_START = "system.start"
-    SYSTEM_SHUTDOWN = "system.shutdown"
-    CONFIG_LOADED = "config.loaded"
-    CONFIG_VALIDATED = "config.validated"
-    
-    # Build events
-    BUILD_START = "build.start"
-    BUILD_STEP_START = "build.step.start"
-    BUILD_STEP_COMPLETED = "build.step.completed"
-    BUILD_STEP_FAILED = "build.step.failed"
-    BUILD_COMPLETED = "build.completed"
-    BUILD_FAILED = "build.failed"
-    
-    # Verification events
-    VERIFY_START = "verify.start"
-    VERIFY_TEST_START = "verify.test.start"
-    VERIFY_TEST_PASSED = "verify.test.passed"
-    VERIFY_TEST_FAILED = "verify.test.failed"
-    VERIFY_COMPLETED = "verify.completed"
-    VERIFY_FAILED = "verify.failed"
-    
-    # Operation events
-    OPERATE_START = "operate.start"
-    OPERATE_ACTION = "operate.action"
-    OPERATE_ALERT = "operate.alert"
-    OPERATE_COMPLETED = "operate.completed"
-    OPERATE_FAILED = "operate.failed"
-    
-    # Resource events
-    RESOURCE_LIMIT_WARNING = "resource.limit.warning"
-    RESOURCE_LIMIT_EXCEEDED = "resource.limit.exceeded"
-
-
-class Event(BaseModel):
-    """Event model for the event bus."""
-    type: EventType
-    timestamp: str = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
-    agent_id: Optional[str] = None
-    run_id: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
-
-
-class EventBus:
-    """
-    Simple in-process event bus for agent communication.
-    
-    This class provides a publish-subscribe mechanism for agents to communicate
-    with each other and with the orchestration engine.
-    """
-    
-    def __init__(self, logger: logging.Logger):
-        self.subscribers: Dict[EventType, Set[callable]] = {}
-        self.queue = asyncio.Queue()
-        self.logger = logger
-        
-    def subscribe(self, event_type: EventType, callback: callable):
-        """Subscribe to an event type with a callback function."""
-        if event_type not in self.subscribers:
-            self.subscribers[event_type] = set()
-        self.subscribers[event_type].add(callback)
-        
-    def unsubscribe(self, event_type: EventType, callback: callable):
-        """Unsubscribe from an event type."""
-        if event_type in self.subscribers and callback in self.subscribers[event_type]:
-            self.subscribers[event_type].remove(callback)
-            
-    async def publish(self, event: Event):
-        """Publish an event to all subscribers."""
-        self.logger.debug(f"Event published: {event.type}", extra={"event": event.dict()})
-        await self.queue.put(event)
-        
-    async def process_events(self):
-        """Process events from the queue."""
-        while True:
-            event = await self.queue.get()
-            
-            # Call subscribers for this event type
-            if event.type in self.subscribers:
-                for callback in self.subscribers[event.type]:
-                    try:
-                        await callback(event)
-                    except Exception as e:
-                        self.logger.error(f"Error in event subscriber: {e}", 
-                                         extra={"event_type": event.type, "error": str(e)})
-            
-            # Mark task as done
-            self.queue.task_done()
-            
-            # Special handling for shutdown event
-            if event.type == EventType.SYSTEM_SHUTDOWN:
-                # Wait for any remaining events to be processed
-                if self.queue.empty():
-                    break
 
 
 class ResourceTracker:
@@ -174,8 +56,12 @@ class ResourceTracker:
         self.start_time = time.time()
         
         # Extract limits from config
-        self.max_cost_usd = config.get("build", {}).get("agents", {}).get("max_cost_usd", float("inf"))
-        self.max_runtime_min = config.get("build", {}).get("agents", {}).get("max_runtime_min", float("inf"))
+        # Limits are now defined under build.constraints (schema update)
+        build_cfg = config.get("build", {})
+        constraints_cfg = build_cfg.get("constraints", {})
+
+        self.max_cost_usd = constraints_cfg.get("max_cost_usd", float("inf"))
+        self.max_runtime_min = constraints_cfg.get("max_runtime_min", float("inf"))
         
         # Initialize counters
         self.current_cost_usd = 0.0
@@ -459,22 +345,45 @@ class AgentFactory:
         
     async def create_builder_agents(self, config: Dict[str, Any], run_id: str) -> List[BuilderAgent]:
         """Create builder agents based on configuration."""
-        builder_config = config.get("build", {}).get("agents", {})
-        count = builder_config.get("count", 1)
-        
-        self.logger.info(f"Creating {count} builder agent(s)")
-        agents = []
-        
-        for i in range(count):
-            agent_id = f"builder-{i+1}"
-            agent = BuilderAgent(
-                agent_id=agent_id,
-                config=config,
-                event_bus=self.event_bus,
-                logger=self.logger
+        builder_cfg = config.get("build", {}).get("agents", {})
+        models_cfg = builder_cfg.get("models", [])
+
+        agents: List[BuilderAgent] = []
+        if models_cfg:
+            self.logger.info(
+                f"Creating builder agents for {len(models_cfg)} model group(s)"
             )
-            agents.append(agent)
-            
+            for model_index, m_cfg in enumerate(models_cfg, start=1):
+                model_agent_count = m_cfg.get("count", 1)
+                for agent_idx in range(1, model_agent_count + 1):
+                    agent_id = f"builder-{model_index}-{agent_idx}"
+                    # Pass run_id into per-agent config copy
+                    cfg_copy = dict(config)
+                    cfg_copy["run_id"] = run_id
+                    agent = BuilderAgent(
+                        agent_id=agent_id,
+                        config=cfg_copy,
+                        event_bus=self.event_bus,
+                        logger=self.logger,
+                    )
+                    agents.append(agent)
+        else:
+            # Fallback: single model style (legacy)
+            count = builder_cfg.get("count", 1)
+            self.logger.info(f"Creating {count} builder agent(s)")
+            for i in range(1, count + 1):
+                agent_id = f"builder-1-{i}"
+                cfg_copy = dict(config)
+                cfg_copy["run_id"] = run_id
+                agents.append(
+                    BuilderAgent(
+                        agent_id=agent_id,
+                        config=cfg_copy,
+                        event_bus=self.event_bus,
+                        logger=self.logger,
+                    )
+                )
+
         return agents
         
     async def create_verifier_agents(self, config: Dict[str, Any], run_id: str) -> List[VerifierAgent]:

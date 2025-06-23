@@ -3,7 +3,12 @@
   "title": "Agent Toolkit Configuration Schema",
   "description": "Configuration schema for the Agent Toolkit, defining builder, verifier, and operator agents",
   "type": "object",
-  "required": ["project", "build"],
+  "required": ["project"],
+  "anyOf": [
+    { "required": ["build"] },
+    { "required": ["verify"] },
+    { "required": ["operate"] }
+  ],
   "properties": {
     "project": {
       "type": "object",
@@ -14,22 +19,6 @@
           "type": "string",
           "description": "Name of the project",
           "minLength": 1
-        },
-        "description": {
-          "type": "string",
-          "description": "Description of what the project aims to build"
-        },
-        "version": {
-          "type": "string",
-          "description": "Version of the project",
-          "pattern": "^[0-9]+(\\.[0-9]+)*$"
-        },
-        "tags": {
-          "type": "array",
-          "description": "Tags to categorize the project",
-          "items": {
-            "type": "string"
-          }
         }
       }
     },
@@ -38,6 +27,10 @@
       "description": "Configuration for builder agents that generate code and artifacts",
       "required": ["agents"],
       "properties": {
+        "overarching_team_goal": {
+          "type": "string",
+          "description": "High-level objective shared by **all** builder agents. Each agent should align its individual goal with this team goal."
+        },
         "agents": {
           "type": "object",
           "description": "Builder agent pool configuration",
@@ -49,22 +42,35 @@
               "minimum": 1,
               "default": 1
             },
-            "model": {
-              "type": "string",
-              "description": "LLM model to use for builder agents",
-              "default": "openai/gpt-4-turbo-preview"
-            },
-            "max_cost_usd": {
-              "type": "number",
-              "description": "Maximum cost in USD for all builder agents combined",
-              "minimum": 0,
-              "default": 10.0
-            },
-            "max_runtime_min": {
-              "type": "integer",
-              "description": "Maximum runtime in minutes for builder agents",
-              "minimum": 1,
-              "default": 60
+            "models": {
+              "type": "array",
+              "description": "List of models and how many builder agents to launch for each. Allows heterogeneous agent pools (e.g. GPT-4 for complex tasks and GPT-3.5 for lightweight ones).",
+              "items": {
+                "type": "object",
+                "required": ["name", "count"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Model identifier. For local models use the prefix `local/`, e.g. `local/my-ggml-model`."
+                  },
+                  "count": {
+                    "type": "integer",
+                    "description": "How many builder agents should use this model.",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "description": "Temperature override for this model (optional).",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "individual_agent_goal": {
+                    "type": "string",
+                    "description": "Specific objective for agents using this model. It should **enrich** (but not override) the overarching_team_goal."
+                  }
+                }
+              }
             },
             "temperature": {
               "type": "number",
@@ -79,17 +85,24 @@
           "type": "object",
           "description": "Additional constraints for the build process",
           "properties": {
-            "max_files": {
-              "type": "integer",
-              "description": "Maximum number of files to generate",
-              "minimum": 1
-            },
             "allowed_languages": {
               "type": "array",
               "description": "Programming languages allowed for code generation",
               "items": {
                 "type": "string"
               }
+            },
+            "max_cost_usd": {
+              "type": "number",
+              "description": "Maximum cost in USD for all builder agents combined",
+              "minimum": 0,
+              "default": 10.0
+            },
+            "max_runtime_min": {
+              "type": "integer",
+              "description": "Maximum runtime in minutes for builder agents",
+              "minimum": 1,
+              "default": 60
             },
             "target_directory": {
               "type": "string",
@@ -122,7 +135,7 @@
             },
             "model": {
               "type": "string",
-              "description": "LLM model to use for verifier agents",
+              "description": "LLM model to use for verifier agents. Use the prefix `local/` to reference a locally-hosted model.",
               "default": "openai/gpt-4-turbo-preview"
             },
             "temperature": {
@@ -131,6 +144,13 @@
               "minimum": 0,
               "maximum": 1,
               "default": 0.2
+            },
+            "individual_agent_goal": {
+              "type": "string",
+              "description": "Specific objective for verifier agents. "
+                             "This goal will be used as the base system prompt to guide each "
+                             "verifier agent’s behaviour and **should complement** the overall "
+                             "verification strategy without overriding global goals."
             }
           }
         },
@@ -211,7 +231,7 @@
             },
             "model": {
               "type": "string",
-              "description": "LLM model to use for operator agents",
+              "description": "LLM model to use for operator agents. Use the prefix `local/` to reference a locally-hosted model.",
               "default": "openai/gpt-4-turbo-preview"
             }
           }
@@ -334,6 +354,28 @@
               }
             }
           ]
+        }
+      }
+    },
+    "local_models": {
+      "type": "array",
+      "description": "Definitions of local models that can be referenced in agent configurations with the prefix 'local/'.",
+      "items": {
+        "type": "object",
+        "required": ["name", "path"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Identifier used in the config to reference this local model (e.g. 'my-ggml-model')."
+          },
+          "path": {
+            "type": "string",
+            "description": "Filesystem path or endpoint URL where the local model is hosted."
+          },
+          "api_type": {
+            "type": "string",
+            "description": "Optional hint for the client on how to call this model (e.g. 'ggml', 'vllm', 'ollama')."
+          }
         }
       }
     }

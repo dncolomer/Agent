@@ -10,7 +10,8 @@ for interacting with the file system.
 import os
 import logging
 import subprocess
-from typing import List, Dict, Optional, Union, Tuple
+import time
+from typing import List, Dict, Optional, Tuple
 import shutil
 import tempfile
 import re
@@ -38,6 +39,16 @@ class ProjectExecutor:
         os.makedirs(self.project_dir, exist_ok=True)
         
         self.logger.info(f"ProjectExecutor initialized with directory: {self.project_dir}")
+        # Internal operation counter to correlate log lines
+        self._op_counter: int = 0
+
+    # ------------------------------------------------------------------ #
+    # Helper utilities                                                   #
+    # ------------------------------------------------------------------ #
+    def _next_op_id(self) -> str:
+        """Return a monotonically-increasing operation id string."""
+        self._op_counter += 1
+        return f"op{self._op_counter:05d}"
     
     def list_files(self, include_dirs: bool = True) -> List[str]:
         """
@@ -81,6 +92,8 @@ class ProjectExecutor:
         """
         abs_path = os.path.join(self.project_dir, file_path)
         
+        op_id = self._next_op_id()
+        start = time.perf_counter()
         try:
             # Create directories if they don't exist
             os.makedirs(os.path.dirname(abs_path), exist_ok=True)
@@ -89,10 +102,11 @@ class ProjectExecutor:
             with open(abs_path, 'w') as f:
                 f.write(content)
             
-            self.logger.info(f"Created file: {file_path}")
+            elapsed = time.perf_counter() - start
+            self.logger.info(f"[{op_id}] Created file: {file_path} ({len(content)} chars, {elapsed:.3f}s)")
             return True
         except Exception as e:
-            self.logger.error(f"Error creating file {file_path}: {e}")
+            self.logger.error(f"[{op_id}] Error creating file {file_path}: {e}")
             return False
     
     def read_file(self, file_path: str) -> Optional[str]:
@@ -111,14 +125,17 @@ class ProjectExecutor:
             self.logger.warning(f"File not found: {file_path}")
             return None
         
+        op_id = self._next_op_id()
+        start = time.perf_counter()
         try:
             with open(abs_path, 'r') as f:
                 content = f.read()
             
-            self.logger.debug(f"Read file: {file_path}")
+            elapsed = time.perf_counter() - start
+            self.logger.debug(f"[{op_id}] Read file: {file_path} ({len(content)} chars, {elapsed:.3f}s)")
             return content
         except Exception as e:
-            self.logger.error(f"Error reading file {file_path}: {e}")
+            self.logger.error(f"[{op_id}] Error reading file {file_path}: {e}")
             return None
     
     def modify_file(self, file_path: str, new_content: str) -> bool:
@@ -138,6 +155,8 @@ class ProjectExecutor:
             self.logger.warning(f"File not found for modification: {file_path}")
             return False
         
+        op_id = self._next_op_id()
+        start = time.perf_counter()
         try:
             # Create a backup of the original file
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -152,7 +171,11 @@ class ProjectExecutor:
             # Remove the backup if everything went well
             os.unlink(backup_path)
             
-            self.logger.info(f"Modified file: {file_path}")
+            elapsed = time.perf_counter() - start
+            self.logger.info(
+                f"[{op_id}] Modified file: {file_path} "
+                f"(new size {len(new_content)} chars, {elapsed:.3f}s)"
+            )
             return True
         except Exception as e:
             # Restore from backup if there was an error
@@ -163,7 +186,7 @@ class ProjectExecutor:
                 except Exception as restore_error:
                     self.logger.error(f"Error restoring backup: {restore_error}")
             
-            self.logger.error(f"Error modifying file {file_path}: {e}")
+            self.logger.error(f"[{op_id}] Error modifying file {file_path}: {e}")
             return False
     
     def apply_patch(self, file_path: str, patch_operations: List[Dict]) -> bool:
@@ -236,12 +259,15 @@ class ProjectExecutor:
             self.logger.warning(f"File not found for deletion: {file_path}")
             return False
         
+        op_id = self._next_op_id()
+        start = time.perf_counter()
         try:
             os.remove(abs_path)
-            self.logger.info(f"Deleted file: {file_path}")
+            elapsed = time.perf_counter() - start
+            self.logger.info(f"[{op_id}] Deleted file: {file_path} ({elapsed:.3f}s)")
             return True
         except Exception as e:
-            self.logger.error(f"Error deleting file {file_path}: {e}")
+            self.logger.error(f"[{op_id}] Error deleting file {file_path}: {e}")
             return False
     
     def run_command(self, command: str, timeout: int = 30) -> Tuple[int, str, str]:
@@ -268,7 +294,9 @@ class ProjectExecutor:
                 self.logger.error(f"Potentially dangerous command rejected: {command}")
                 return (1, '', 'Command rejected for security reasons')
         
-        self.logger.info(f"Running command: {command}")
+        op_id = self._next_op_id()
+        start = time.perf_counter()
+        self.logger.info(f"[{op_id}] Running command: {command}")
         
         try:
             process = subprocess.Popen(
@@ -282,16 +310,23 @@ class ProjectExecutor:
             
             stdout, stderr = process.communicate(timeout=timeout)
             
-            self.logger.debug(f"Command completed with return code: {process.returncode}")
+            elapsed = time.perf_counter() - start
+            debug_msg = (
+                f"[{op_id}] Command completed rc={process.returncode} "
+                f"elapsed={elapsed:.2f}s stdout_len={len(stdout)} stderr_len={len(stderr)}"
+            )
+            if self.logger.isEnabledFor(logging.DEBUG):
+                debug_msg += f"\n[{op_id}] STDOUT:\n{stdout}\n[{op_id}] STDERR:\n{stderr}"
+            self.logger.debug(debug_msg)
             return (process.returncode, stdout, stderr)
         
         except subprocess.TimeoutExpired:
             process.kill()
-            self.logger.error(f"Command timed out after {timeout} seconds: {command}")
+            self.logger.error(f"[{op_id}] Command timed out after {timeout} seconds: {command}")
             return (1, '', f'Command timed out after {timeout} seconds')
         
         except Exception as e:
-            self.logger.error(f"Error running command: {e}")
+            self.logger.error(f"[{op_id}] Error running command: {e}")
             return (1, '', str(e))
     
     def create_directory(self, dir_path: str) -> bool:
@@ -306,12 +341,15 @@ class ProjectExecutor:
         """
         abs_path = os.path.join(self.project_dir, dir_path)
         
+        op_id = self._next_op_id()
+        start = time.perf_counter()
         try:
             os.makedirs(abs_path, exist_ok=True)
-            self.logger.info(f"Created directory: {dir_path}")
+            elapsed = time.perf_counter() - start
+            self.logger.info(f"[{op_id}] Created directory: {dir_path} ({elapsed:.3f}s)")
             return True
         except Exception as e:
-            self.logger.error(f"Error creating directory {dir_path}: {e}")
+            self.logger.error(f"[{op_id}] Error creating directory {dir_path}: {e}")
             return False
     
     def file_exists(self, file_path: str) -> bool:

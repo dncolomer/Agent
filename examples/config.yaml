@@ -5,28 +5,18 @@
 # Project metadata
 project:
   name: e-commerce-recommendation-engine
-  description: >
-    A machine learning-based product recommendation engine for e-commerce
-    platforms that analyzes user behavior and purchase history to provide
-    personalized product suggestions.
-  version: 0.1.0
-  tags:
-    - machine-learning
-    - e-commerce
-    - python
-    - api
+  # Additional metadata fields (description, version, tags) removed to match new schema
 
 # Builder agents configuration
 build:
   agents:
     count: 3  # Use multiple builder agents for parallel work
     model: openai/gpt-4o  # High-capability model for complex code generation
-    max_cost_usd: 8.50  # Budget constraint
-    max_runtime_min: 45  # Time constraint
     temperature: 0.3  # Lower temperature for more deterministic output
   
   constraints:
-    max_files: 25  # Limit project complexity
+    max_cost_usd: 8.50   # Budget constraint (moved from agents)
+    max_runtime_min: 45  # Time constraint   (moved from agents)
     allowed_languages:
       - python
       - javascript

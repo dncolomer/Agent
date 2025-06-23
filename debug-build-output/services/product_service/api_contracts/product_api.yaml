@@ -1,0 +1,133 @@
+openapi: 3.0.0
+info:
+  title: Product Service API
+  description: API contract for the product microservice, providing endpoints for product management.
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/products
+    description: Production server
+  - url: https://staging-api.example.com/products
+    description: Staging server
+paths:
+  /products:
+    get:
+      summary: Retrieve a list of products
+      operationId: getProducts
+      responses:
+        '200':
+          description: A list of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        '500':
+          description: Internal server error
+    post:
+      summary: Create a new product
+      operationId: createProduct
+      requestBody:
+        description: Product object that needs to be added
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Product'
+      responses:
+        '201':
+          description: Product created successfully
+        '400':
+          description: Invalid input
+        '500':
+          description: Internal server error
+  /products/{productId}:
+    get:
+      summary: Retrieve a single product by ID
+      operationId: getProductById
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A single product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+        '500':
+          description: Internal server error
+    put:
+      summary: Update an existing product
+      operationId: updateProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Updated product object
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Product'
+      responses:
+        '200':
+          description: Product updated successfully
+        '400':
+          description: Invalid input
+        '404':
+          description: Product not found
+        '500':
+          description: Internal server error
+    delete:
+      summary: Delete a product by ID
+      operationId: deleteProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Product deleted successfully
+        '404':
+          description: Product not found
+        '500':
+          description: Internal server error
+components:
+  schemas:
+    Product:
+      type: object
+      required:
+        - id
+        - name
+        - price
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the product
+        name:
+          type: string
+          description: Name of the product
+        description:
+          type: string
+          description: Description of the product
+        price:
+          type: number
+          format: float
+          description: Price of the product
+        category:
+          type: string
+          description: Category of the product
+        stock:
+          type: integer
+          description: Available stock for the product

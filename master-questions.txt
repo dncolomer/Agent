@@ -1,0 +1,22 @@
+**Builder Agents**
+X we wanna drop description / version and tags from the project specs in the config
+X What do you do with the project info
+X drop max files
+X move max_runtime_min and max_cost_usd to the constraints block for build
+X What do these constrains do? Stop? / warn?
+X I wanna be able to define how many agents of each model
+X I wanna be able to support local models as well
+X How are all the "build" properties used in the code. Show me where they are loaded and used
+- ? how do we wanna think about loging?
+
+
+**Verifier Agents**
+- I wanna be able to define how many agents of each model
+- I wanna be able to support local models as well
+- note to self: Think what to do about temperature in general
+- remove path / target_rps / timeout_sec
+- remove the fix options for test types. klets work with test goals instead
+-- I wanna be able to define (via prompt) a test goal for any given test agent. Essentially define verifier agent types with goals and then be able to specific how many of each type.
+-- The testing goal should be a prompt
+
+**Operator Agents**

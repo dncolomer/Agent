@@ -1,0 +1,119 @@
+openapi: 3.0.0
+info:
+  title: Product Service API
+  description: API contract for managing products in the e-commerce platform.
+  version: 1.0.0
+servers:
+  - url: /api/v1
+paths:
+  /products:
+    get:
+      summary: Retrieve a list of products
+      operationId: getProducts
+      responses:
+        '200':
+          description: A list of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+        '500':
+          description: Internal server error
+    post:
+      summary: Create a new product
+      operationId: createProduct
+      requestBody:
+        description: Product to be created
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Product'
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          description: Invalid input
+        '500':
+          description: Internal server error
+  /products/{productId}:
+    get:
+      summary: Retrieve a product by ID
+      operationId: getProductById
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+        '500':
+          description: Internal server error
+    put:
+      summary: Update an existing product
+      operationId: updateProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        description: Updated product information
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Product'
+      responses:
+        '200':
+          description: Product updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          description: Invalid input
+        '404':
+          description: Product not found
+        '500':
+          description: Internal server error
+components:
+  schemas:
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique identifier for the product
+        name:
+          type: string
+          description: Name of the product
+        description:
+          type: string
+          description: Detailed description of the product
+        price:
+          type: number
+          format: float
+          description: Price of the product
+        available:
+          type: boolean
+          description: Availability status of the product
+      required:
+        - name
+        - price
+        - available
