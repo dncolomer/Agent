@@ -388,22 +388,49 @@ class AgentFactory:
         
     async def create_verifier_agents(self, config: Dict[str, Any], run_id: str) -> List[VerifierAgent]:
         """Create verifier agents based on configuration."""
-        verifier_config = config.get("verify", {}).get("agents", {})
-        count = verifier_config.get("count", 1)
-        
-        self.logger.info(f"Creating {count} verifier agent(s)")
-        agents = []
-        
-        for i in range(count):
-            agent_id = f"verifier-{i+1}"
-            agent = VerifierAgent(
-                agent_id=agent_id,
-                config=config,
-                event_bus=self.event_bus,
-                logger=self.logger
+        verifier_cfg = config.get("verify", {}).get("agents", {})
+        models_cfg = verifier_cfg.get("models", [])
+
+        agents: List[VerifierAgent] = []
+
+        if models_cfg:
+            self.logger.info(
+                f"Creating verifier agents for {len(models_cfg)} model group(s)"
             )
-            agents.append(agent)
-            
+            for model_index, m_cfg in enumerate(models_cfg, start=1):
+                model_agent_count = m_cfg.get("count", 1)
+                for agent_idx in range(1, model_agent_count + 1):
+                    agent_id = f"verifier-{model_index}-{agent_idx}"
+
+                    # Each verifier gets a shallow-copy of the full config with the run-id injected.
+                    cfg_copy = dict(config)
+                    cfg_copy["run_id"] = run_id
+
+                    agents.append(
+                        VerifierAgent(
+                            agent_id=agent_id,
+                            config=cfg_copy,
+                            event_bus=self.event_bus,
+                            logger=self.logger,
+                        )
+                    )
+        else:
+            # Legacy single-model style
+            count = verifier_cfg.get("count", 1)
+            self.logger.info(f"Creating {count} verifier agent(s)")
+            for i in range(1, count + 1):
+                agent_id = f"verifier-1-{i}"
+                cfg_copy = dict(config)
+                cfg_copy["run_id"] = run_id
+                agents.append(
+                    VerifierAgent(
+                        agent_id=agent_id,
+                        config=cfg_copy,
+                        event_bus=self.event_bus,
+                        logger=self.logger,
+                    )
+                )
+
         return agents
         
     async def create_operator_agents(self, config: Dict[str, Any], run_id: str) -> List[OperatorAgent]:

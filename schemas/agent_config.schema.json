@@ -133,6 +133,42 @@
               "minimum": 0,
               "default": 1
             },
+            "models": {
+              "type": "array",
+              "description": "List of models and how many verifier agents to launch for each. "
+                             "Allows heterogeneous verifier pools (e.g. a strict security model plus a fast doc-review model). "
+                             "Use the prefix `local/` for locally-hosted models (e.g. `local/my-secure-model`). "
+                             "If omitted the legacy single-model keys (`model`, `count`, `temperature`) are used.",
+              "items": {
+                "type": "object",
+                "required": ["name", "count"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Model identifier. For local models use the prefix `local/`, "
+                                   "e.g. `local/my-ggml-model`."
+                  },
+                  "count": {
+                    "type": "integer",
+                    "description": "How many verifier agents should use this model.",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "description": "Temperature override for this verifier model (optional).",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "individual_agent_goal": {
+                    "type": "string",
+                    "description": "Specific objective for verifier agents using this model. "
+                                   "This goal is injected into the verifier’s base system prompt "
+                                   "and should complement (not override) the global verification strategy."
+                  }
+                }
+              }
+            },
             "model": {
               "type": "string",
               "description": "LLM model to use for verifier agents. Use the prefix `local/` to reference a locally-hosted model.",
@@ -151,59 +187,6 @@
                              "This goal will be used as the base system prompt to guide each "
                              "verifier agent’s behaviour and **should complement** the overall "
                              "verification strategy without overriding global goals."
-            }
-          }
-        },
-        "tests": {
-          "type": "array",
-          "description": "List of test configurations to run",
-          "items": {
-            "type": "object",
-            "required": ["type"],
-            "properties": {
-              "type": {
-                "type": "string",
-                "description": "Type of test to run",
-                "enum": ["unit", "integration", "performance", "security", "custom"]
-              },
-              "path": {
-                "type": "string",
-                "description": "Path to test files or directory"
-              },
-              "target_rps": {
-                "type": "integer",
-                "description": "Target requests per second for performance tests",
-                "minimum": 1
-              },
-              "custom_command": {
-                "type": "string",
-                "description": "Custom command to run for custom test type"
-              },
-              "timeout_sec": {
-                "type": "integer",
-                "description": "Timeout in seconds for this test",
-                "minimum": 1,
-                "default": 300
-              }
-            }
-          }
-        },
-        "thresholds": {
-          "type": "object",
-          "description": "Thresholds for verification success",
-          "properties": {
-            "min_test_coverage": {
-              "type": "number",
-              "description": "Minimum test coverage percentage required",
-              "minimum": 0,
-              "maximum": 100,
-              "default": 80
-            },
-            "max_critical_issues": {
-              "type": "integer",
-              "description": "Maximum number of critical issues allowed",
-              "minimum": 0,
-              "default": 0
             }
           }
         }

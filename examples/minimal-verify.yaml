@@ -44,13 +44,7 @@ verify:
       standards, and ensuring adherence to best practices across the entire
       codebase. Provide concise, actionable feedback to builders that
       improves robustness, readability, and maintainability.
-  tests:
-    - type: unit
-      path: tests/
-      timeout_sec: 60
-  thresholds:
-    min_test_coverage: 70.0
-    max_critical_issues: 0
+
 
 # Logging configuration for debugging
 logging:
