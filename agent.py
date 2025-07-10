@@ -156,13 +156,14 @@ class Agent(BaseAgent):
 
         self.logger.info(f"OpenRouter interface initialised for {self.agent_id}")
     
-    async def _openrouter_generate(self, prompt: str, system_prompt: str = None) -> str:
+    async def _openrouter_generate(self, prompt: str, system_prompt: str = None, response_format: Optional[Dict[str, Any]] = None) -> str:
         """
         Generate text using the OpenRouter API.
 
         Args:
             prompt:      The user prompt.
             system_prompt: Optional system prompt providing context.
+            response_format: Optional structured output format specification.
 
         Returns:
             The generated assistant text, or a descriptive error string.
@@ -186,6 +187,10 @@ class Agent(BaseAgent):
             "messages": messages,
             "temperature": self.llm["temperature"]
         }
+        
+        # Add response format if specified
+        if response_format:
+            data["response_format"] = response_format
 
         try:
             resp = requests.post(
@@ -284,7 +289,11 @@ The plan should be comprehensive and include all steps needed to achieve this go
         
         try:
             # Generate the plan using the LLM
-            response = await self.llm["generate"](prompt, system_prompt)
+            response = await self.llm["generate"](
+                prompt, 
+                system_prompt,
+                response_format={"type": "json_object"}
+            )
             
             # Parse the JSON response
             # Extract JSON from the response (in case it's wrapped in markdown or explanatory text)
@@ -441,57 +450,137 @@ The plan should be comprehensive and include all steps needed to achieve this go
         """
         self.logger.info(f"Builder agent {self.agent_id} executing task: {task.description}")
         
-        # Create system prompt for the LLM
+        # Create system prompt for the LLM with EXPLICIT file format instructions
         system_prompt = f"""You are an AI assistant helping a builder agent implement the following task:
 {task.description}
 
 The agent's goal is: {self.goal}
 The overall team goal is: {self.config.get('overarching_team_goal', 'Not specified')}
 
-You should provide detailed, implementable code or content that the agent can use to complete this task.
-Be specific and provide complete implementations.
+IMPORTANT: You must respond with a JSON object containing an array of files to create. Each file should have:
+1. A valid file path (relative to the target directory: {self.target_directory})
+2. The complete content for that file
+
+DO NOT use descriptive labels like "File 1:" or "File:" as part of file paths.
+File paths should be actual paths like "app.py", "src/index.js", or "config/settings.json".
+
+Example response format:
+{{
+  "files": [
+    {{
+      "path": "app.py",
+      "content": "import flask\\n\\napp = flask.Flask(__name__)\\n\\n@app.route('/')\\ndef index():\\n    return 'Hello, world!'\\n\\nif __name__ == '__main__':\\n    app.run(debug=True)"
+    }},
+    {{
+      "path": "requirements.txt",
+      "content": "flask==2.0.1\\nrequests==2.26.0"
+    }}
+  ]
+}}
+
+ALWAYS use this exact JSON format. Do not include any explanatory text outside the JSON structure.
 """
         
         # Create prompt based on task description
         prompt = f"""I need to implement the following task:
 {task.description}
 
-Please provide me with the necessary code, file content, or instructions to complete this task.
-Include file paths, code snippets, and any other details needed for implementation.
-
-For each file that needs to be created or modified, provide:
-1. The file path
-2. The complete content of the file
-3. Any special instructions for implementation
+Please provide the necessary code files to complete this task.
 
 Target directory: {self.target_directory}
+
+IMPORTANT: Respond ONLY with a JSON object containing an array of files to create.
+Each file must have a proper file path (like "app.py" or "src/components/TodoList.js") and complete content.
+Do not use descriptive labels like "File 1:" or "File:" in your response.
 """
         
-        # Generate implementation using LLM
-        response = await self.llm["generate"](prompt, system_prompt)
-        
-        # Parse the response to extract file operations
-        file_operations = self._parse_file_operations(response)
-        
-        # Execute file operations
-        success = True
-        for op in file_operations:
-            if op["type"] == "create":
-                op_success = await self._create_file(op["path"], op["content"])
-                if not op_success:
-                    success = False
-            elif op["type"] == "modify":
-                op_success = await self._modify_file(op["path"], op["content"])
-                if not op_success:
-                    success = False
-                    
-        # Store the result
-        task.result = {
-            "file_operations": file_operations,
-            "success": success
-        }
-        
-        return success
+        try:
+            # Generate implementation using LLM with structured output
+            response = await self.llm["generate"](
+                prompt, 
+                system_prompt,
+                response_format={"type": "json_object"}
+            )
+            
+            # Parse the JSON response
+            try:
+                # First try direct JSON parsing
+                file_data = json.loads(response)
+            except json.JSONDecodeError:
+                # If that fails, try to extract JSON from markdown
+                json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', response, re.DOTALL)
+                if json_match:
+                    file_data = json.loads(json_match.group(1))
+                else:
+                    raise ValueError(f"Could not parse JSON from response: {response[:100]}...")
+            
+            # Process the file operations from the structured response
+            file_operations = []
+            for file_info in file_data.get("files", []):
+                path = file_info.get("path", "")
+                content = file_info.get("content", "")
+                
+                # Skip invalid paths
+                if not path or not self._is_valid_path(path):
+                    self.logger.warning(f"Skipping invalid file path: {path}")
+                    continue
+                
+                # Make path relative to target directory
+                if not path.startswith(self.target_directory):
+                    path = os.path.join(self.target_directory, path)
+                
+                # Check if file exists
+                if os.path.exists(path):
+                    file_operations.append({
+                        "type": "modify",
+                        "path": path,
+                        "content": content
+                    })
+                else:
+                    file_operations.append({
+                        "type": "create",
+                        "path": path,
+                        "content": content
+                    })
+            
+            # Execute file operations
+            success = True
+            for op in file_operations:
+                if op["type"] == "create":
+                    op_success = await self._create_file(op["path"], op["content"])
+                    if not op_success:
+                        success = False
+                elif op["type"] == "modify":
+                    op_success = await self._modify_file(op["path"], op["content"])
+                    if not op_success:
+                        success = False
+            
+            # If no valid file operations were found, use fallback parsing
+            if not file_operations:
+                self.logger.warning(f"No valid file operations found in structured response, falling back to regex parsing")
+                file_operations = self._parse_file_operations(response)
+                
+                # Execute fallback file operations
+                for op in file_operations:
+                    if op["type"] == "create":
+                        op_success = await self._create_file(op["path"], op["content"])
+                        if not op_success:
+                            success = False
+                    elif op["type"] == "modify":
+                        op_success = await self._modify_file(op["path"], op["content"])
+                        if not op_success:
+                            success = False
+            
+            # Store the result
+            task.result = {
+                "file_operations": file_operations,
+                "success": success
+            }
+            
+            return success
+        except Exception as e:
+            self.logger.error(f"Error executing builder task: {e}")
+            return False
     
     async def _execute_operator_task(self, task: Task) -> bool:
         """
@@ -517,64 +606,130 @@ The overall team goal is: {self.config.get('overarching_team_goal', 'Not specifi
 
 You should provide detailed test plans, validation steps, or verification procedures.
 Be specific about what to check and how to interpret results.
+
+IMPORTANT: Respond with a JSON object containing an array of test operations to perform. Each operation should have:
+1. A type ("command" or "file_check")
+2. For commands: the command to execute
+3. For file checks: the file path to check
+
+Example response format:
+{{
+  "tests": [
+    {{
+      "type": "command",
+      "command": "python -m pytest tests/"
+    }},
+    {{
+      "type": "file_check",
+      "path": "app.py"
+    }}
+  ]
+}}
+
+ALWAYS use this exact JSON format. Do not include any explanatory text outside the JSON structure.
 """
         
         # Create prompt based on task description
         prompt = f"""I need to test or validate the following:
 {task.description}
 
-Please provide me with a detailed test plan, including:
-1. What files or components to test
-2. How to test them (commands, procedures, etc.)
-3. What results to expect
-4. How to interpret the results
+Please provide me with a detailed test plan.
 
 Target directory: {self.target_directory}
+
+IMPORTANT: Respond ONLY with a JSON object containing an array of test operations to perform.
 """
         
-        # Generate test plan using LLM
-        response = await self.llm["generate"](prompt, system_prompt)
-        
-        # Parse the response to extract test operations
-        test_operations = self._parse_test_operations(response)
-        
-        # Execute test operations
-        success = True
-        test_results = []
-        
-        for op in test_operations:
-            if op["type"] == "command":
-                result, output = await self._run_command(op["command"])
-                test_results.append({
-                    "type": "command",
-                    "command": op["command"],
-                    "success": result,
-                    "output": output
-                })
-                if not result:
-                    success = False
-            elif op["type"] == "file_check":
-                result, output = await self._check_file(op["path"], op.get("expected_content"))
-                test_results.append({
-                    "type": "file_check",
-                    "path": op["path"],
-                    "success": result,
-                    "output": output
-                })
-                if not result:
-                    success = False
-                    
-        # Store the result
-        task.result = {
-            "test_operations": test_operations,
-            "test_results": test_results,
-            "success": success
-        }
-        
-        # Update the agent's test results
-        self.test_results[task.id] = test_results
-        
-        return success
+        try:
+            # Generate test plan using LLM with structured output
+            response = await self.llm["generate"](
+                prompt, 
+                system_prompt,
+                response_format={"type": "json_object"}
+            )
+            
+            # Parse the JSON response
+            try:
+                # First try direct JSON parsing
+                test_data = json.loads(response)
+            except json.JSONDecodeError:
+                # If that fails, try to extract JSON from markdown
+                json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', response, re.DOTALL)
+                if json_match:
+                    test_data = json.loads(json_match.group(1))
+                else:
+                    raise ValueError(f"Could not parse JSON from response: {response[:100]}...")
+            
+            # Process the test operations from the structured response
+            test_operations = []
+            for test_info in test_data.get("tests", []):
+                test_type = test_info.get("type", "")
+                
+                if test_type == "command":
+                    command = test_info.get("command", "")
+                    if command:
+                        test_operations.append({
+                            "type": "command",
+                            "command": command
+                        })
+                elif test_type == "file_check":
+                    path = test_info.get("path", "")
+                    if path:
+                        # Make path relative to target directory if needed
+                        if not path.startswith(self.target_directory):
+                            path = os.path.join(self.target_directory, path)
+                        
+                        test_operations.append({
+                            "type": "file_check",
+                            "path": path,
+                            "expected_content": test_info.get("expected_content")
+                        })
+            
+            # If no valid test operations were found, use fallback parsing
+            if not test_operations:
+                self.logger.warning(f"No valid test operations found in structured response, falling back to regex parsing")
+                test_operations = self._parse_test_operations(response)
+            
+            # Execute test operations
+            success = True
+            test_results = []
+            
+            for op in test_operations:
+                if op["type"] == "command":
+                    result, output = await self._run_command(op["command"])
+                    test_results.append({
+                        "type": "command",
+                        "command": op["command"],
+                        "success": result,
+                        "output": output
+                    })
+                    if not result:
+                        success = False
+                elif op["type"] == "file_check":
+                    result, output = await self._check_file(op["path"], op.get("expected_content"))
+                    test_results.append({
+                        "type": "file_check",
+                        "path": op["path"],
+                        "success": result,
+                        "output": output
+                    })
+                    if not result:
+                        success = False
+            
+            # Store the result
+            task.result = {
+                "test_operations": test_operations,
+                "test_results": test_results,
+                "success": success
+            }
+            
+            # Update the agent's test results
+            self.test_results[task.id] = test_results
+            
+            return success
+        except Exception as e:
+            self.logger.error(f"Error executing operator task: {e}")
+            return False
     
     def _parse_file_operations(self, response: str) -> List[Dict[str, Any]]:
         """
@@ -693,9 +848,10 @@ Target directory: {self.target_directory}
 
         # Reject lines that start with common labels (case-insensitive)
         bad_prefixes = [
-            "file", "file:", "file path", "file path:", "file to modify", "file to modify:"
+            "file", "file:", "file path", "file path:", "file to modify", "file to modify:",
+            "summary", "special", "target", "optional", "activate"
         ]
-        if any(p.lower().startswith(bp) for bp in bad_prefixes):
+        if any(p.lower().startswith(bp.lower()) for bp in bad_prefixes):
             return False
 
         # Must contain a path separator OR an extension
