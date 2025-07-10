@@ -22,16 +22,13 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 # Import concrete agent implementations
-from agent_toolkit.agents import BaseAgent, BuilderAgent, VerifierAgent
-# from agent_toolkit.agents.operator import OperatorAgent
+# NOTE: We are moving towards a single unified `Agent` implementation.
+#       `BaseAgent` is kept for typing; `Agent` is used for instantiation.
+from agent_toolkit.agents import BaseAgent
+from agent_toolkit.agents.agent import Agent
 
 # Import event primitives from dedicated module
 from agent_toolkit.events import EventType, Event, EventBus
-
-# --------------------------------------------------------------------------- #
-class OperatorAgent(BaseAgent):
-    """Placeholder for the OperatorAgent class."""
-    pass
 
 
 class ResourceTracker:
@@ -49,9 +46,7 @@ class ResourceTracker:
         self.start_time = time.time()
         
         # Extract limits from config
-        # Limits are now defined under build.constraints (schema update)
-        build_cfg = config.get("build", {})
-        constraints_cfg = build_cfg.get("constraints", {})
+        constraints_cfg = config.get("constraints", {})
 
         self.max_cost_usd = constraints_cfg.get("max_cost_usd", float("inf"))
         self.max_runtime_min = constraints_cfg.get("max_runtime_min", float("inf"))
@@ -369,136 +364,21 @@ class AgentFactory:
 
         created: List[BaseAgent] = []
         for entry in agents_cfg:
-            # Determine concrete agent class
-            agent_cls = BuilderAgent if entry["type"] == "builder" else OperatorAgent
             count = entry.get("count", 1)
             for _ in range(count):
                 m = next(manifest_iter)
                 cfg_copy = dict(config)
                 cfg_copy["run_id"] = run_id
-                agent = agent_cls(
+                agent = Agent(
                     agent_id=m["agent_id"],
                     config=cfg_copy,
                     event_bus=self.event_bus,
                     logger=self.logger,
-                    agent_manifest=manifest,  # <- requires BaseAgent to accept
+                    agent_manifest=manifest,
                 )
                 created.append(agent)
 
         return created
-
-    # ------------------------------------------------------------------ #
-    # Legacy creators kept (unused) for backward compatibility           #
-    # ------------------------------------------------------------------ #
-    async def create_builder_agents(self, config: Dict[str, Any], run_id: str) -> List[BuilderAgent]:
-        """Create builder agents based on configuration."""
-        builder_cfg = config.get("build", {}).get("agents", {})
-        models_cfg = builder_cfg.get("models", [])
-
-        agents: List[BuilderAgent] = []
-        if models_cfg:
-            self.logger.info(
-                f"Creating builder agents for {len(models_cfg)} model group(s)"
-            )
-            for model_index, m_cfg in enumerate(models_cfg, start=1):
-                model_agent_count = m_cfg.get("count", 1)
-                for agent_idx in range(1, model_agent_count + 1):
-                    agent_id = f"builder-{model_index}-{agent_idx}"
-                    # Pass run_id into per-agent config copy
-                    cfg_copy = dict(config)
-                    cfg_copy["run_id"] = run_id
-                    agent = BuilderAgent(
-                        agent_id=agent_id,
-                        config=cfg_copy,
-                        event_bus=self.event_bus,
-                        logger=self.logger,
-                    )
-                    agents.append(agent)
-        else:
-            # Fallback: single model style (legacy)
-            count = builder_cfg.get("count", 1)
-            self.logger.info(f"Creating {count} builder agent(s)")
-            for i in range(1, count + 1):
-                agent_id = f"builder-1-{i}"
-                cfg_copy = dict(config)
-                cfg_copy["run_id"] = run_id
-                agents.append(
-                    BuilderAgent(
-                        agent_id=agent_id,
-                        config=cfg_copy,
-                        event_bus=self.event_bus,
-                        logger=self.logger,
-                    )
-                )
-
-        return agents
-        
-    async def create_verifier_agents(self, config: Dict[str, Any], run_id: str) -> List[VerifierAgent]:
-        """Create verifier agents based on configuration."""
-        verifier_cfg = config.get("verify", {}).get("agents", {})
-        models_cfg = verifier_cfg.get("models", [])
-
-        agents: List[VerifierAgent] = []
-
-        if models_cfg:
-            self.logger.info(
-                f"Creating verifier agents for {len(models_cfg)} model group(s)"
-            )
-            for model_index, m_cfg in enumerate(models_cfg, start=1):
-                model_agent_count = m_cfg.get("count", 1)
-                for agent_idx in range(1, model_agent_count + 1):
-                    agent_id = f"verifier-{model_index}-{agent_idx}"
-
-                    # Each verifier gets a shallow-copy of the full config with the run-id injected.
-                    cfg_copy = dict(config)
-                    cfg_copy["run_id"] = run_id
-
-                    agents.append(
-                        VerifierAgent(
-                            agent_id=agent_id,
-                            config=cfg_copy,
-                            event_bus=self.event_bus,
-                            logger=self.logger,
-                        )
-                    )
-        else:
-            # Legacy single-model style
-            count = verifier_cfg.get("count", 1)
-            self.logger.info(f"Creating {count} verifier agent(s)")
-            for i in range(1, count + 1):
-                agent_id = f"verifier-1-{i}"
-                cfg_copy = dict(config)
-                cfg_copy["run_id"] = run_id
-                agents.append(
-                    VerifierAgent(
-                        agent_id=agent_id,
-                        config=cfg_copy,
-                        event_bus=self.event_bus,
-                        logger=self.logger,
-                    )
-                )
-
-        return agents
-        
-    async def create_operator_agents(self, config: Dict[str, Any], run_id: str) -> List[OperatorAgent]:
-        """Create operator agents based on configuration."""
-        operator_config = config.get("operate", {}).get("operator_agents", {})
-        count = operator_config.get("count", 1)
-        
-        self.logger.info(f"Creating {count} operator agent(s)")
-        agents = []
-        
-        for i in range(count):
-            agent_id = f"operator-{i+1}"
-            agent = OperatorAgent(
-                agent_id=agent_id,
-                config=config,
-                event_bus=self.event_bus,
-                logger=self.logger
-            )
-            agents.append(agent)
-            
-        return agents
 
 
 class Orchestrator:
@@ -531,10 +411,8 @@ class Orchestrator:
         # Set up agent factory
         self.agent_factory = AgentFactory(self.event_bus, self.resource_tracker, self.logger)
         
-        # Initialize agent lists
-        self.builder_agents: List[BuilderAgent] = []
-        self.verifier_agents: List[VerifierAgent] = []
-        self.operator_agents: List[OperatorAgent] = []
+        # Unified agent list (builders and operators)
+        self.agents: List[BaseAgent] = []
         
         # Set up event handlers
         self._setup_event_handlers()
@@ -631,219 +509,6 @@ class Orchestrator:
             ))
             return False
             
-    async def initialize_agents(self):
-        """Initialize all agents based on configuration."""
-        self.logger.info("Initializing agents")
-        
-        # Create builder agents
-        self.builder_agents = await self.agent_factory.create_builder_agents(
-            self.config, self.run_id
-        )
-        
-        # Create verifier agents
-        self.verifier_agents = await self.agent_factory.create_verifier_agents(
-            self.config, self.run_id
-        )
-        
-        # Create operator agents
-        self.operator_agents = await self.agent_factory.create_operator_agents(
-            self.config, self.run_id
-        )
-        
-        self.logger.info(
-            f"Initialized {len(self.builder_agents)} builder, "
-            f"{len(self.verifier_agents)} verifier, and "
-            f"{len(self.operator_agents)} operator agents"
-        )
-        
-    async def run_build_phase(self):
-        """Run the build phase with builder agents."""
-        self.logger.info("Starting build phase")
-        await self.event_bus.publish(Event(
-            type=EventType.BUILD_START,
-            run_id=self.run_id,
-            payload={"agent_count": len(self.builder_agents)}
-        ))
-        
-        # Start all builder agents
-        tasks = []
-        for agent in self.builder_agents:
-            tasks.append(agent.start())
-            
-        # Wait for all agents to complete
-        try:
-            await asyncio.gather(*tasks)
-            self.logger.info("Build phase completed successfully")
-            await self.event_bus.publish(Event(
-                type=EventType.BUILD_COMPLETED,
-                run_id=self.run_id
-            ))
-            return True
-        except Exception as e:
-            self.logger.error(f"Build phase failed: {e}")
-            await self.event_bus.publish(Event(
-                type=EventType.BUILD_FAILED,
-                run_id=self.run_id,
-                payload={"error": str(e)}
-            ))
-            return False
-            
-    async def run_verify_phase(self):
-        """Run the verification phase with verifier agents."""
-        # Check if verification is enabled
-        if not self.verifier_agents:
-            self.logger.info("Verification phase skipped (no verifier agents configured)")
-            return True
-            
-        self.logger.info("Starting verification phase")
-        await self.event_bus.publish(Event(
-            type=EventType.VERIFY_START,
-            run_id=self.run_id,
-            payload={"agent_count": len(self.verifier_agents)}
-        ))
-        
-        # Get verification strategy
-        strategy = self.config.get("verify", {}).get("strategy", "sequential")
-        
-        if strategy == "sequential":
-            return await self._run_sequential_verification()
-        elif strategy == "parallel":
-            return await self._run_parallel_verification()
-        elif strategy == "gated":
-            return await self._run_gated_verification()
-        else:
-            self.logger.warning(f"Unknown verification strategy: {strategy}, using sequential")
-            return await self._run_sequential_verification()
-            
-    async def _run_sequential_verification(self):
-        """Run verification agents sequentially."""
-        self.logger.info("Using sequential verification strategy")
-        
-        for agent in self.verifier_agents:
-            try:
-                await agent.start()
-            except Exception as e:
-                self.logger.error(f"Verification agent {agent.agent_id} failed: {e}")
-                await self.event_bus.publish(Event(
-                    type=EventType.VERIFY_FAILED,
-                    run_id=self.run_id,
-                    agent_id=agent.agent_id,
-                    payload={"error": str(e)}
-                ))
-                return False
-                
-        self.logger.info("Verification phase completed successfully")
-        await self.event_bus.publish(Event(
-            type=EventType.VERIFY_COMPLETED,
-            run_id=self.run_id
-        ))
-        return True
-        
-    async def _run_parallel_verification(self):
-        """Run verification agents in parallel."""
-        self.logger.info("Using parallel verification strategy")
-        
-        tasks = []
-        for agent in self.verifier_agents:
-            tasks.append(agent.start())
-            
-        try:
-            await asyncio.gather(*tasks)
-            self.logger.info("Verification phase completed successfully")
-            await self.event_bus.publish(Event(
-                type=EventType.VERIFY_COMPLETED,
-                run_id=self.run_id
-            ))
-            return True
-        except Exception as e:
-            self.logger.error(f"Verification phase failed: {e}")
-            await self.event_bus.publish(Event(
-                type=EventType.VERIFY_FAILED,
-                run_id=self.run_id,
-                payload={"error": str(e)}
-            ))
-            return False
-            
-    async def _run_gated_verification(self):
-        """Run verification with gates between tests."""
-        self.logger.info("Using gated verification strategy")
-        
-        # Get test configurations
-        tests = self.config.get("verify", {}).get("tests", [])
-        
-        for i, test_config in enumerate(tests):
-            test_type = test_config.get("type", "unknown")
-            self.logger.info(f"Running {test_type} test ({i+1}/{len(tests)})")
-            
-            # Assign test to an agent (round-robin)
-            agent_index = i % len(self.verifier_agents)
-            agent = self.verifier_agents[agent_index]
-            
-            try:
-                # In a real implementation, we'd pass the test config to the agent
-                await agent.start()
-            except Exception as e:
-                self.logger.error(f"Test {test_type} failed: {e}")
-                await self.event_bus.publish(Event(
-                    type=EventType.VERIFY_TEST_FAILED,
-                    run_id=self.run_id,
-                    agent_id=agent.agent_id,
-                    payload={"test_type": test_type, "error": str(e)}
-                ))
-                return False
-                
-            self.logger.info(f"Test {test_type} passed")
-            await self.event_bus.publish(Event(
-                type=EventType.VERIFY_TEST_PASSED,
-                run_id=self.run_id,
-                agent_id=agent.agent_id,
-                payload={"test_type": test_type}
-            ))
-            
-        self.logger.info("All verification tests passed")
-        await self.event_bus.publish(Event(
-            type=EventType.VERIFY_COMPLETED,
-            run_id=self.run_id
-        ))
-        return True
-        
-    async def run_operate_phase(self):
-        """Run the operation phase with operator agents."""
-        # Check if operation is enabled
-        if not self.operator_agents:
-            self.logger.info("Operation phase skipped (no operator agents configured)")
-            return True
-            
-        self.logger.info("Starting operation phase")
-        await self.event_bus.publish(Event(
-            type=EventType.OPERATE_START,
-            run_id=self.run_id,
-            payload={"agent_count": len(self.operator_agents)}
-        ))
-        
-        # Start all operator agents
-        tasks = []
-        for agent in self.operator_agents:
-            tasks.append(agent.start())
-            
-        # Wait for all agents to complete
-        try:
-            await asyncio.gather(*tasks)
-            self.logger.info("Operation phase completed successfully")
-            await self.event_bus.publish(Event(
-                type=EventType.OPERATE_COMPLETED,
-                run_id=self.run_id
-            ))
-            return True
-        except Exception as e:
-            self.logger.error(f"Operation phase failed: {e}")
-            await self.event_bus.publish(Event(
-                type=EventType.OPERATE_FAILED,
-                run_id=self.run_id,
-                payload={"error": str(e)}
-            ))
-            return False
-            
     async def run(self):
         """Run the full orchestration process."""
         self.logger.info(f"Starting Agent Toolkit run: {self.run_id}")
@@ -864,25 +529,22 @@ class Orchestrator:
             await self.shutdown("Configuration validation failed")
             return False
             
-        # Initialize agents
-        await self.initialize_agents()
+        # Create all agents
+        self.agents = await self.agent_factory.create_agents(self.config, self.run_id)
+        self.logger.info(f"Created {len(self.agents)} agents")
         
-        # Run build phase
-        if not await self.run_build_phase():
-            self.logger.error("Build phase failed, aborting")
-            await self.shutdown("Build phase failed")
-            return False
+        # Start all agents in parallel
+        agent_tasks = []
+        for agent in self.agents:
+            agent_tasks.append(agent.start())
             
-        # Run verification phase
-        if not await self.run_verify_phase():
-            self.logger.error("Verification phase failed, aborting")
-            await self.shutdown("Verification phase failed")
-            return False
-            
-        # Run operation phase
-        if not await self.run_operate_phase():
-            self.logger.error("Operation phase failed, aborting")
-            await self.shutdown("Operation phase failed")
+        # Wait for all agents to complete
+        try:
+            await asyncio.gather(*agent_tasks)
+            self.logger.info("All agents completed successfully")
+        except Exception as e:
+            self.logger.error(f"Error running agents: {e}")
+            await self.shutdown("Agent execution failed")
             return False
             
         # Successful completion
@@ -932,7 +594,7 @@ class Orchestrator:
         # ------------------------------------------------------------------ #
         # 3) Stop all agents (they might still publish a few final events)   #
         # ------------------------------------------------------------------ #
-        for agent in self.builder_agents + self.verifier_agents + self.operator_agents:
+        for agent in self.agents:
             try:
                 await agent.stop()
             except Exception as e:

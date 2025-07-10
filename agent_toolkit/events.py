@@ -24,28 +24,13 @@ class EventType(str, Enum):
     CONFIG_LOADED = "config.loaded"
     CONFIG_VALIDATED = "config.validated"
     
-    # Build events
-    BUILD_START = "build.start"
-    BUILD_STEP_START = "build.step.start"
-    BUILD_STEP_COMPLETED = "build.step.completed"
-    BUILD_STEP_FAILED = "build.step.failed"
-    BUILD_COMPLETED = "build.completed"
-    BUILD_FAILED = "build.failed"
-    
-    # Verification events
-    VERIFY_START = "verify.start"
-    VERIFY_TEST_START = "verify.test.start"
-    VERIFY_TEST_PASSED = "verify.test.passed"
-    VERIFY_TEST_FAILED = "verify.test.failed"
-    VERIFY_COMPLETED = "verify.completed"
-    VERIFY_FAILED = "verify.failed"
-    
-    # Operation events
-    OPERATE_START = "operate.start"
-    OPERATE_ACTION = "operate.action"
-    OPERATE_ALERT = "operate.alert"
-    OPERATE_COMPLETED = "operate.completed"
-    OPERATE_FAILED = "operate.failed"
+    # Unified agent-centric events
+    AGENT_START = "agent.start"
+    AGENT_TASK_START = "agent.task.start"
+    AGENT_TASK_COMPLETED = "agent.task.completed"
+    AGENT_TASK_FAILED = "agent.task.failed"
+    AGENT_COMPLETED = "agent.completed"
+    AGENT_FAILED = "agent.failed"
     
     # Resource events
     RESOURCE_LIMIT_WARNING = "resource.limit.warning"
