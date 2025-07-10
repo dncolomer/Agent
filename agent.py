@@ -33,6 +33,7 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     BLOCKED = "blocked"
+    SKIPPED = "skipped"  # New status for skipped dependencies
 
 class Task:
     """Represents a single task that an agent needs to perform."""
@@ -47,6 +48,7 @@ class Task:
         self.created_at = time.time()
         self.started_at = None
         self.completed_at = None
+        self.dependency_wait_start = None  # Track when we started waiting for dependencies
         
     def to_dict(self) -> Dict[str, Any]:
         """Convert task to a dictionary for serialization."""
@@ -121,6 +123,10 @@ class Agent(BaseAgent):
         
         # For operator agents
         self.test_results = {}
+        
+        # Dependency resolution settings
+        self.max_dependency_wait_time = 60  # Maximum time to wait for a dependency in seconds
+        self.external_dependency_timeout = 30  # Time to wait for external dependencies before skipping
         
         # LLM interface
         self.llm = None
@@ -261,30 +267,40 @@ class Agent(BaseAgent):
         """
         self.logger.info(f"Planning tasks for {self.agent_id} to achieve goal: {self.goal}")
         
-        # Create a prompt for the LLM
-        system_prompt = f"""You are an AI assistant helping to plan tasks for a {self.agent_type} agent.
+        # Create a prompt for the LLM with explicit instructions about dependencies
+        system_prompt = f"""You are an AI assistant helping to plan tasks for a {self.agent_type} agent with ID '{self.agent_id}'.
 The agent's goal is: {self.goal}
 The overall team goal is: {self.config.get('overarching_team_goal', 'Not specified')}
 
-Please break down this goal into specific, actionable tasks. Each task should have:
-1. A unique ID
+IMPORTANT INSTRUCTIONS:
+1. Break down the goal into specific, actionable tasks.
+2. Each task must have a unique ID prefixed with "{self.agent_id}-" (e.g., "{self.agent_id}-task1").
+3. Tasks should ONLY depend on other tasks from THIS SAME AGENT. DO NOT create dependencies on tasks from other agents.
+4. For operator agents: DO NOT create dependencies on builder agents' tasks. Assume all necessary files already exist.
+5. Create a self-contained plan that this agent can execute independently.
+
+Each task should have:
+1. A unique ID (prefixed with the agent's ID)
 2. A clear description
-3. Dependencies (IDs of tasks that must be completed before this one)
+3. Dependencies (IDs of THIS AGENT'S tasks that must be completed before this one)
 
 Respond with a JSON object containing an array of tasks. Example format:
 {{
   "tasks": [
-    {{"id": "task1", "description": "First task description", "dependencies": []}},
-    {{"id": "task2", "description": "Second task description", "dependencies": ["task1"]}},
+    {{"id": "{self.agent_id}-task1", "description": "First task description", "dependencies": []}},
+    {{"id": "{self.agent_id}-task2", "description": "Second task description", "dependencies": ["{self.agent_id}-task1"]}},
     ...
   ]
 }}
 """
         
-        prompt = f"""Please create a detailed plan for a {self.agent_type} agent with the following goal:
+        prompt = f"""Please create a detailed plan for a {self.agent_type} agent (ID: {self.agent_id}) with the following goal:
 {self.goal}
 
 The plan should be comprehensive and include all steps needed to achieve this goal.
+
+IMPORTANT: Create a self-contained plan with tasks that ONLY depend on other tasks from this same agent.
+DO NOT create dependencies on tasks from other agents.
 """
         
         try:
@@ -310,10 +326,24 @@ The plan should be comprehensive and include all steps needed to achieve this go
             
             # Create Task objects from the plan
             for task_data in plan_data.get("tasks", []):
+                task_id = task_data["id"]
+                
+                # Ensure task IDs are prefixed with agent ID
+                if not task_id.startswith(f"{self.agent_id}-"):
+                    task_id = f"{self.agent_id}-{task_id}"
+                
+                # Process dependencies to ensure they're properly prefixed
+                dependencies = []
+                for dep in task_data.get("dependencies", []):
+                    if not dep.startswith(f"{self.agent_id}-"):
+                        dependencies.append(f"{self.agent_id}-{dep}")
+                    else:
+                        dependencies.append(dep)
+                
                 task = Task(
-                    id=task_data["id"],
+                    id=task_id,
                     description=task_data["description"],
-                    dependencies=task_data.get("dependencies", [])
+                    dependencies=dependencies
                 )
                 self.tasks.append(task)
             
@@ -360,7 +390,8 @@ The plan should be comprehensive and include all steps needed to achieve this go
         Get the next task that can be executed.
         
         This method checks dependencies and returns the first task
-        that is ready to be executed.
+        that is ready to be executed. It includes timeout handling for
+        dependencies that might never be satisfied.
         
         Returns:
             The next executable task, or None if no tasks are ready
@@ -368,21 +399,67 @@ The plan should be comprehensive and include all steps needed to achieve this go
         if not self.tasks:
             return None
             
+        current_time = time.time()
+        
         for task in self.tasks:
             if task.status != TaskStatus.PENDING:
                 continue
                 
             # Check if all dependencies are completed
             dependencies_met = True
+            external_dependencies = []
+            
             for dep_id in task.dependencies:
-                dep_task = next((t for t in self.tasks if t.id == dep_id), None)
-                if not dep_task or dep_task.status != TaskStatus.COMPLETED:
-                    dependencies_met = False
-                    break
-                    
+                # Check if this is an internal dependency (from this agent)
+                if dep_id.startswith(f"{self.agent_id}-"):
+                    dep_task = next((t for t in self.tasks if t.id == dep_id), None)
+                    if not dep_task or dep_task.status != TaskStatus.COMPLETED:
+                        dependencies_met = False
+                        break
+                else:
+                    # This is an external dependency (from another agent)
+                    external_dependencies.append(dep_id)
+            
+            # If all internal dependencies are met, check external ones
+            if dependencies_met and external_dependencies:
+                # Start tracking wait time if not already started
+                if task.dependency_wait_start is None:
+                    task.dependency_wait_start = current_time
+                    self.logger.info(f"Task {task.id} is waiting for external dependencies: {external_dependencies}")
+                
+                # Check if we've waited long enough for external dependencies
+                wait_time = current_time - task.dependency_wait_start
+                if wait_time >= self.external_dependency_timeout:
+                    self.logger.warning(
+                        f"Timeout waiting for external dependencies for task {task.id}. "
+                        f"Skipping dependencies: {external_dependencies}"
+                    )
+                    # Clear external dependencies and proceed with the task
+                    task.dependencies = [d for d in task.dependencies if d.startswith(f"{self.agent_id}-")]
+                    return task
+                else:
+                    # Still waiting for external dependencies
+                    continue
+            
             if dependencies_met:
                 return task
                 
+        # No ready tasks found, check for deadlocks
+        pending_tasks = [t for t in self.tasks if t.status == TaskStatus.PENDING]
+        if pending_tasks:
+            # Check if any task has been waiting too long
+            for task in pending_tasks:
+                if task.dependency_wait_start is None:
+                    task.dependency_wait_start = current_time
+                elif current_time - task.dependency_wait_start >= self.max_dependency_wait_time:
+                    self.logger.warning(
+                        f"Dependency wait timeout for task {task.id}. "
+                        f"Proceeding with task execution despite unmet dependencies."
+                    )
+                    # Clear all dependencies and return this task
+                    task.dependencies = []
+                    return task
+                    
         return None
     
     async def _execute_task(self, task: Task) -> bool:
@@ -1121,8 +1198,8 @@ IMPORTANT: Respond ONLY with a JSON object containing an array of test operation
                 if task:
                     # Execute the task
                     await self._execute_task(task)
-                elif all(task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED] for task in self.tasks):
-                    # All tasks are completed or failed
+                elif all(task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.SKIPPED] for task in self.tasks):
+                    # All tasks are completed, failed, or skipped
                     self.logger.info(f"All tasks completed for {self.agent_id}")
                     break
                 else:
