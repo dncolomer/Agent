@@ -2,20 +2,17 @@
 """
 agent_toolkit.agents - Agent Definitions for the Agent Toolkit
 
-This package defines the different types of agents used in the Agent Toolkit:
-Builder, Verifier, and Operator agents, along with a common BaseAgent.
+This package exposes the unified `Agent` implementation together with the
+shared `BaseAgent` class.  Specific roles such as *builder* and *operator*
+are now expressed via the agent configuration (the `type` field) rather than
+dedicated Python subclasses.
 """
 
-from .base_agent import BaseAgent
-from .builder import BuilderAgent
-# Expose the verifier agent implementation
-from .verifier import VerifierAgent
-# from .operator import OperatorAgent
+from .base import BaseAgent
+from .agent import Agent
 
 # Define what's available when using `from agent_toolkit.agents import *`
 __all__ = [
     "BaseAgent",
-    "BuilderAgent",
-    "VerifierAgent",
-    # "OperatorAgent",
+    "Agent",
 ]
