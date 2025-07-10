@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TODO List Application</title>
+    <!-- Add any additional head content such as stylesheets or fonts here -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>TODO List</h1>
+    </header>
+    <main>
+        <!-- Form for adding new TODO items -->
+        <section id="add-item-form">
+            <h2>Add New Item</h2>
+            <form action="/add" method="POST">
+                <label for="new-item">New Item:</label>
+                <input type="text" id="new-item" name="item" required>
+                <button type="submit">Add Item</button>
+            </form>
+        </section>
+
+        <!-- Form for updating existing TODO items -->
+        <!-- This form will be populated with existing item data using JavaScript -->
+        <section id="update-item-form" style="display:none;">
+            <h2>Update Item</h2>
+            <form action="/update" method="POST">
+                <input type="hidden" id="update-item-id" name="id">
+                <label for="update-item">Item:</label>
+                <input type="text" id="update-item" name="item" required>
+                <button type="submit">Update Item</button>
+            </form>
+        </section>
+
+        <!-- TODO List display -->
+        <section id="todo-list">
+            <h2>Items</h2>
+            <ul>
+                <!-- Items will be populated here using JavaScript -->
+                <!-- Example: -->
+                <!-- <li>Task 1 <button class="edit-button">Edit</button></li> -->
+            </ul>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2023 TODO List Application</p>
+    </footer>
+
+    <!-- JavaScript for dynamic content and form handling -->
+    <script src="app.js"></script>
+</body>
+</html>

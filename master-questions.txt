@@ -7,7 +7,11 @@ X What do these constrains do? Stop? / warn?
 X I wanna be able to define how many agents of each model
 X I wanna be able to support local models as well
 X How are all the "build" properties used in the code. Show me where they are loaded and used
-- ? how do we wanna think about loging?
+X ? how do we wanna think about loging?
+- add eventbus consumption eventbus
+- how are agents collaborating? I want them to share context with each other if needed
+- how is work split between agents?
+- maybe we need to step ahead and add some verfier agent that does work with the builder intertwined
 
 
 **Verifier Agents**

@@ -22,20 +22,13 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError
 
 # Import concrete agent implementations
-from agent_toolkit.agents import BaseAgent, BuilderAgent
-# from agent_toolkit.agents.verifier import VerifierAgent
+from agent_toolkit.agents import BaseAgent, BuilderAgent, VerifierAgent
 # from agent_toolkit.agents.operator import OperatorAgent
 
 # Import event primitives from dedicated module
 from agent_toolkit.events import EventType, Event, EventBus
 
 # --------------------------------------------------------------------------- #
-
-class VerifierAgent(BaseAgent):
-    """Placeholder for the VerifierAgent class."""
-    pass
-
-
 class OperatorAgent(BaseAgent):
     """Placeholder for the OperatorAgent class."""
     pass
@@ -859,20 +852,59 @@ class Orchestrator:
     async def shutdown(self, reason: str = "Unknown reason"):
         """Shutdown the orchestrator and all agents."""
         self.logger.info(f"Shutting down orchestrator: {reason}")
-        
-        # Stop all agents
+
+        # ------------------------------------------------------------------ #
+        # 1) Allow in-flight events a moment to be processed                 #
+        # ------------------------------------------------------------------ #
+        DRAIN_PAUSE_SEC = 0.5
+        await asyncio.sleep(DRAIN_PAUSE_SEC)
+
+        # ------------------------------------------------------------------ #
+        # 2) Wait for the EventBus queue to drain before we stop agents      #
+        # ------------------------------------------------------------------ #
+        QUEUE_DRAIN_TIMEOUT = 5.0  # seconds
+        self.logger.debug(
+            "Waiting for event queue to empty before stopping agents...",
+            extra={"timeout_sec": QUEUE_DRAIN_TIMEOUT},
+        )
+        try:
+            await asyncio.wait_for(self.event_bus.queue.join(), timeout=QUEUE_DRAIN_TIMEOUT)
+            self.logger.debug("Event queue drained.")
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "Timed-out waiting for event queue to drain; proceeding with shutdown."
+            )
+
+        # ------------------------------------------------------------------ #
+        # 3) Stop all agents (they might still publish a few final events)   #
+        # ------------------------------------------------------------------ #
         for agent in self.builder_agents + self.verifier_agents + self.operator_agents:
             try:
                 await agent.stop()
             except Exception as e:
                 self.logger.error(f"Error stopping agent {agent.agent_id}: {e}")
-                
-        # Publish shutdown event
-        await self.event_bus.publish(Event(
-            type=EventType.SYSTEM_SHUTDOWN,
-            run_id=self.run_id,
-            payload={"reason": reason}
-        ))
+
+        # Small pause so any events emitted during `.stop()` get queued
+        await asyncio.sleep(0.2)
+
+        # Drain again quickly
+        try:
+            await asyncio.wait_for(self.event_bus.queue.join(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+
+        # ------------------------------------------------------------------ #
+        # 4) Emit final SYSTEM_SHUTDOWN event                                #
+        # ------------------------------------------------------------------ #
+        await self.event_bus.publish(
+            Event(
+                type=EventType.SYSTEM_SHUTDOWN,
+                run_id=self.run_id,
+                payload={"reason": reason},
+            )
+        )
+
+        self.logger.info("Shutdown sequence complete.")
 
 
 async def run_orchestrator(config_path: str) -> bool:
