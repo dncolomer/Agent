@@ -106,8 +106,9 @@ class Agent(BaseAgent):
             {}
         )
         self.goal = self.agent_entry.get("goal", "No specific goal defined")
-        # Default to env DEFAULT_MODEL or OpenRouter's ``auto`` selector
-        self.model = self.agent_entry.get("model") or os.getenv("DEFAULT_MODEL", "auto")
+        # Default to env DEFAULT_MODEL or OpenRouter's specific model selector
+        # Don't use "auto" as it might not be recognized by OpenRouter
+        self.model = self.agent_entry.get("model") or os.getenv("DEFAULT_MODEL", "openai/gpt-3.5-turbo")
         self.temperature = self.agent_entry.get("temperature", 0.7)
         
         # Task management
@@ -170,7 +171,9 @@ class Agent(BaseAgent):
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.llm['api_key']}"
+            "Authorization": f"Bearer {self.llm['api_key']}",
+            "HTTP-Referer": "https://github.com/dncolomer/Agent",  # Required by OpenRouter
+            "X-Title": f"Agent Toolkit - {self.agent_id}"  # Required by OpenRouter
         }
 
         messages: List[Dict[str, str]] = []
@@ -191,25 +194,45 @@ class Agent(BaseAgent):
                 json=data,
                 timeout=30
             )
+            
             # ------------------------------------------------------------------ #
-            # Helpful handling for auth failures                                 #
+            # Helpful handling for common API errors                             #
             # ------------------------------------------------------------------ #
             if resp.status_code == 401:
-                # Give the user a direct, actionable message.
+                # Give the user a direct, actionable message for auth errors
                 helpful_msg = (
                     "OpenRouter API returned 401 Unauthorized. "
                     "Please verify that your OPENROUTER_API_KEY environment "
                     "variable is set correctly, has not expired, and has "
                     "sufficient quota."
                 )
-                # Log raw body for debugging (at debug level only).
+                # Log raw body for debugging
                 self.logger.debug(
                     f"OpenRouter 401 response body: {resp.text}",
                     extra={"agent_id": self.agent_id},
                 )
                 self.logger.error(helpful_msg, extra={"agent_id": self.agent_id})
-                # Raise an explicit error so the orchestrator halts early.
+                # Raise an explicit error so the orchestrator halts early
                 raise RuntimeError(helpful_msg)
+            elif resp.status_code == 400:
+                # Handle Bad Request errors with detailed information
+                helpful_msg = (
+                    "OpenRouter API returned 400 Bad Request. "
+                    "This typically means there's an issue with the request format, "
+                    "invalid model name, or missing required parameters."
+                )
+                # Log raw body for debugging
+                self.logger.debug(
+                    f"OpenRouter 400 response body: {resp.text}",
+                    extra={
+                        "agent_id": self.agent_id,
+                        "model": self.llm["model"],
+                        "request_data": data
+                    },
+                )
+                self.logger.error(helpful_msg, extra={"agent_id": self.agent_id})
+                # Raise an explicit error with the response body
+                raise RuntimeError(f"{helpful_msg} Response: {resp.text}")
 
             resp.raise_for_status()
             payload = resp.json()
