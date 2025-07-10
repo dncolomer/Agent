@@ -16,7 +16,7 @@ overarching_team_goal: >
 agents:
   # Builder 1 – backend
   - type: builder
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.3
     goal: >
@@ -24,7 +24,7 @@ agents:
 
   # Builder 2 – frontend
   - type: builder
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.3
     goal: >
@@ -32,7 +32,7 @@ agents:
 
   # Builder 3 – documentation / start-up
   - type: builder
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.3
     goal: >
@@ -41,7 +41,7 @@ agents:
 
   # Operator 1 – end-to-end tester
   - type: operator
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.15
     goal: >
@@ -50,7 +50,7 @@ agents:
 
   # Operator 2 – documentation tester
   - type: operator
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.15
     goal: >
@@ -60,7 +60,7 @@ agents:
 
   # Operator 3 – route tester
   - type: operator
-    model: google/gemini-1.5-pro-latest
+    model: auto
     count: 1
     temperature: 0.15
     goal: >

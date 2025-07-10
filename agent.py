@@ -106,7 +106,8 @@ class Agent(BaseAgent):
             {}
         )
         self.goal = self.agent_entry.get("goal", "No specific goal defined")
-        self.model = self.agent_entry.get("model", "openai/gpt-4-turbo-preview")
+        # Default to env DEFAULT_MODEL or OpenRouter's ``auto`` selector
+        self.model = self.agent_entry.get("model") or os.getenv("DEFAULT_MODEL", "auto")
         self.temperature = self.agent_entry.get("temperature", 0.7)
         
         # Task management
@@ -125,55 +126,28 @@ class Agent(BaseAgent):
         
     async def _initialize_llm(self):
         """
-        Initialize the LLM interface based on the agent's configuration.
-        
-        This method sets up the appropriate LLM client based on the model
-        specified in the configuration.
+        Initialise a single OpenRouter LLM interface (with mock fallback).
         """
-        self.logger.info(f"Initializing LLM interface for {self.agent_id} with model {self.model}")
-        
-        # Simple LLM interface using requests
-        # In a real implementation, this would be a more sophisticated client
-        # that handles different model providers and formats
-        
-        # Check if model is local or remote
-        if self.model.startswith("local/"):
-            # Local model setup would go here
-            self.logger.warning(f"Local models not fully implemented. Using fallback for {self.model}")
-            # Fallback to a mock LLM for now
+        self.logger.info(f"Initialising OpenRouter LLM interface for {self.agent_id} with model {self.model}")
+
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_base = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+
+        if not api_key:
+            self.logger.warning("OPENROUTER_API_KEY not set – falling back to mock LLM.")
             self.llm = self._mock_llm_interface()
-        elif self.model.startswith("openai/"):
-            # OpenAI API setup
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                self.logger.warning("OpenAI API key not found, using mock LLM")
-                self.llm = self._mock_llm_interface()
-            else:
-                # Use actual OpenAI interface
-                self.llm = {
-                    "generate": self._openai_generate,
-                    "model": self.model.replace("openai/", ""),
-                    "temperature": self.temperature
-                }
-        elif self.model.startswith("google/"):
-            # Google API setup
-            api_key = os.getenv("GOOGLE_API_KEY")
-            if not api_key:
-                self.logger.warning("Google API key not found, using mock LLM")
-                self.llm = self._mock_llm_interface()
-            else:
-                # Use actual Google interface
-                self.llm = {
-                    "generate": self._google_generate,
-                    "model": self.model.replace("google/", ""),
-                    "temperature": self.temperature
-                }
-        else:
-            # Default to mock LLM
-            self.logger.warning(f"Unknown model provider for {self.model}, using mock LLM")
-            self.llm = self._mock_llm_interface()
-            
-        self.logger.info(f"LLM interface initialized for {self.agent_id}")
+            return
+
+        # Configure OpenRouter interface
+        self.llm = {
+            "generate": self._openrouter_generate,
+            "model": self.model,
+            "temperature": self.temperature,
+            "api_key": api_key,
+            "api_base": api_base.rstrip("/")
+        }
+
+        self.logger.info(f"OpenRouter interface initialised for {self.agent_id}")
     
     def _mock_llm_interface(self):
         """Create a mock LLM interface for testing."""
@@ -215,77 +189,51 @@ class Agent(BaseAgent):
         else:
             return "I've processed your request and am ready to assist with the next steps."
     
-    async def _openai_generate(self, prompt: str, system_prompt: str = None) -> str:
-        """Generate text using OpenAI API."""
-        self.logger.info(f"Generating with OpenAI for {self.agent_id}")
-        
-        api_key = os.getenv("OPENAI_API_KEY")
+    async def _openrouter_generate(self, prompt: str, system_prompt: str = None) -> str:
+        """
+        Generate text using the OpenRouter API.
+
+        Args:
+            prompt:      The user prompt.
+            system_prompt: Optional system prompt providing context.
+
+        Returns:
+            The generated assistant text, or a descriptive error string.
+        """
+        self.logger.info(f"Generating with OpenRouter for {self.agent_id}")
+
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "Authorization": f"Bearer {self.llm['api_key']}"
         }
-        
-        messages = []
+
+        messages: List[Dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
+
         data = {
             "model": self.llm["model"],
             "messages": messages,
             "temperature": self.llm["temperature"]
         }
-        
+
         try:
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
+            resp = requests.post(
+                f"{self.llm['api_base']}/chat/completions",
                 headers=headers,
                 json=data,
                 timeout=30
             )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            self.logger.error(f"Error generating with OpenAI: {e}")
-            return f"Error: {str(e)}"
-    
-    async def _google_generate(self, prompt: str, system_prompt: str = None) -> str:
-        """Generate text using Google API."""
-        self.logger.info(f"Generating with Google for {self.agent_id}")
-        
-        api_key = os.getenv("GOOGLE_API_KEY")
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
-        # Adjust endpoint and request format based on Google's API requirements
-        # This is a placeholder and would need to be updated with actual API details
-        data = {
-            "model": self.llm["model"],
-            "messages": messages,
-            "temperature": self.llm["temperature"]
-        }
-        
-        try:
-            response = requests.post(
-                f"https://generativelanguage.googleapis.com/v1/models/{self.llm['model']}:generateContent",
-                headers=headers,
-                params={"key": api_key},
-                json=data,
-                timeout=30
+            resp.raise_for_status()
+            payload = resp.json()
+            return payload["choices"][0]["message"]["content"]
+        except Exception as exc:
+            self.logger.error(
+                f"Error generating with OpenRouter: {exc}",
+                extra={"agent_id": self.agent_id}
             )
-            response.raise_for_status()
-            # Parse response according to Google's API format
-            # This is a placeholder and would need to be updated
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            self.logger.error(f"Error generating with Google: {e}")
-            return f"Error: {str(e)}"
+            return f"Error: {str(exc)}"
     
     async def _plan_tasks(self) -> bool:
         """
