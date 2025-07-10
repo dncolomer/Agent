@@ -57,3 +57,9 @@ logging:
   additional_sinks:
     - type: stdout
       format: json     # keep structured output on console too
+
+# Visualization settings – automatically render collaboration diagrams
+visualization:
+  enabled: true            # Turn on auto-visualization at the end of the run
+  type: both               # Generate both network graph and timeline
+  output_directory: ./visualizations  # Where to save PNG files

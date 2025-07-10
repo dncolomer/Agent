@@ -29,6 +29,8 @@ from agent import Agent
 
 # Import event primitives from dedicated module
 from events import EventType, Event, EventBus
+# Visualization support
+from visualizer import Visualizer
 
 
 class ResourceTracker:
@@ -421,6 +423,11 @@ class Orchestrator:
         
         # Unified agent list (builders and operators)
         self.agents: List[BaseAgent] = []
+
+        # ------------------------------------------------------------------ #
+        # Visualizer (creates collaboration diagrams if enabled in YAML)     #
+        # ------------------------------------------------------------------ #
+        self.visualizer = Visualizer(self.config, self.logger)
         
         # Set up event handlers
         self._setup_event_handlers()
@@ -598,6 +605,14 @@ class Orchestrator:
             f"Resource usage summary: {summary['elapsed_time']['minutes']:.2f} minutes, "
             f"${summary['cost']['usd']:.2f}, {summary['tokens']['total']} tokens"
         )
+
+        # ------------------------------------------------------------------ #
+        # Generate collaboration visualizations (if enabled)                 #
+        # ------------------------------------------------------------------ #
+        try:
+            await self.visualizer.visualize_run(self.run_id)
+        except Exception as viz_exc:
+            self.logger.error(f"Visualization generation failed: {viz_exc}")
         
         # Shutdown
         await self.shutdown("Run completed successfully")
