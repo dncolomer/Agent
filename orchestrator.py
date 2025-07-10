@@ -396,12 +396,18 @@ class Orchestrator:
         self.config_path = config_path
         self.config = self._load_config()
         
-        # Set up structured logging
-        self.structured_logger = StructuredLogger(self.config)
-        self.logger = self.structured_logger.get_logger()
-        
         # Generate a unique run ID
         self.run_id = str(uuid.uuid4())
+
+        # ------------------------------------------------------------------ #
+        # Ensure each run writes logs to its own file under logs/            #
+        # ------------------------------------------------------------------ #
+        self._adjust_log_paths_with_run_id()
+
+        # Set up structured logging (after we tweaked the paths)
+        self.structured_logger = StructuredLogger(self.config)
+        self.logger = self.structured_logger.get_logger()
+
         self.logger.info(f"Initializing orchestrator with run ID: {self.run_id}")
         
         # Set up event bus
@@ -419,6 +425,40 @@ class Orchestrator:
         # Set up event handlers
         self._setup_event_handlers()
         
+    # ------------------------------------------------------------------ #
+    # Logging path helper                                                #
+    # ------------------------------------------------------------------ #
+    def _adjust_log_paths_with_run_id(self):
+        """
+        Ensure file-based log sinks write to `logs/<name>-<run_id>.<ext>`.
+
+        This mutates ``self.config`` in-place *before* StructuredLogger
+        initialises so that the unique path is honoured.
+        """
+        log_cfg = self.config.setdefault("logging", {})
+
+        def _rewrite_path(sink: Dict[str, Any]):
+            if sink.get("type") != "file":
+                return
+            orig_path = sink.get("path", "logs/agent-run.ndjson")
+            p = Path(orig_path)
+
+            # Guarantee directory is logs/
+            dir_part = Path("logs")
+            stem = p.stem
+            ext = p.suffix or ".ndjson"
+            new_path = dir_part / f"{stem}-{self.run_id}{ext}"
+
+            # Make sure directory exists at runtime (logger also does this)
+            os.makedirs(dir_part, exist_ok=True)
+            sink["path"] = str(new_path)
+
+        # Primary sink
+        _rewrite_path(log_cfg.setdefault("sink", {"type": "stdout"}))
+        # Additional sinks
+        for add_sink in log_cfg.get("additional_sinks", []):
+            _rewrite_path(add_sink)
+
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from file."""
         path = Path(self.config_path)
