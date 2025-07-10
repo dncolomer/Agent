@@ -126,7 +126,10 @@ class Agent(BaseAgent):
         
     async def _initialize_llm(self):
         """
-        Initialise a single OpenRouter LLM interface (with mock fallback).
+        Initialise the OpenRouter LLM interface.
+
+        This agent strictly depends on the presence of an ``OPENROUTER_API_KEY``.
+        If the key is missing, a ``RuntimeError`` is raised to stop execution.
         """
         self.logger.info(f"Initialising OpenRouter LLM interface for {self.agent_id} with model {self.model}")
 
@@ -134,9 +137,12 @@ class Agent(BaseAgent):
         api_base = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
 
         if not api_key:
-            self.logger.warning("OPENROUTER_API_KEY not set – falling back to mock LLM.")
-            self.llm = self._mock_llm_interface()
-            return
+            error_msg = (
+                "OPENROUTER_API_KEY environment variable is required but not set. "
+                "Aborting agent initialisation."
+            )
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
         # Configure OpenRouter interface
         self.llm = {
@@ -148,46 +154,6 @@ class Agent(BaseAgent):
         }
 
         self.logger.info(f"OpenRouter interface initialised for {self.agent_id}")
-    
-    def _mock_llm_interface(self):
-        """Create a mock LLM interface for testing."""
-        return {
-            "generate": self._mock_generate,
-            "model": "mock-model",
-            "temperature": self.temperature
-        }
-        
-    async def _mock_generate(self, prompt: str, system_prompt: str = None) -> str:
-        """Mock LLM generation for testing."""
-        self.logger.info(f"Mock LLM generating response for {self.agent_id}")
-        
-        # Simple responses based on prompt content
-        if "plan" in prompt.lower():
-            if self.agent_type == "builder":
-                return json.dumps({
-                    "tasks": [
-                        {"id": "task1", "description": "Analyze requirements", "dependencies": []},
-                        {"id": "task2", "description": "Set up project structure", "dependencies": ["task1"]},
-                        {"id": "task3", "description": "Implement core functionality", "dependencies": ["task2"]},
-                        {"id": "task4", "description": "Add error handling", "dependencies": ["task3"]},
-                        {"id": "task5", "description": "Write documentation", "dependencies": ["task4"]}
-                    ]
-                })
-            else:  # operator
-                return json.dumps({
-                    "tasks": [
-                        {"id": "task1", "description": "Verify project structure", "dependencies": []},
-                        {"id": "task2", "description": "Test core functionality", "dependencies": ["task1"]},
-                        {"id": "task3", "description": "Validate error handling", "dependencies": ["task2"]},
-                        {"id": "task4", "description": "Check documentation", "dependencies": ["task3"]}
-                    ]
-                })
-        elif "execute" in prompt.lower():
-            return "Task execution simulated successfully."
-        elif "file" in prompt.lower():
-            return "print('Hello, world!')"
-        else:
-            return "I've processed your request and am ready to assist with the next steps."
     
     async def _openrouter_generate(self, prompt: str, system_prompt: str = None) -> str:
         """
