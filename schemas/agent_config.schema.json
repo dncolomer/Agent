@@ -1,14 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Agent Toolkit Configuration Schema",
-  "description": "Configuration schema for the Agent Toolkit, defining builder, verifier, and operator agents",
+  "description": "Configuration schema for the Agent Toolkit, defining builder and operator agents",
   "type": "object",
   "required": ["project"],
-  "anyOf": [
-    { "required": ["build"] },
-    { "required": ["verify"] },
-    { "required": ["operate"] }
-  ],
   "properties": {
     "project": {
       "type": "object",
@@ -22,239 +17,73 @@
         }
       }
     },
-    "build": {
+
+    "overarching_team_goal": {
+      "type": "string",
+      "description": "A high-level objective shared by ALL agents."
+    },
+
+    "agents": {
+      "type": "array",
+      "description": "List of agent configurations (builders and operators).",
+      "items": {
+        "type": "object",
+        "required": ["type", "goal", "model"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["builder", "operator"],
+            "description": "Role of the agent."
+          },
+          "goal": {
+            "type": "string",
+            "description": "Objective for this agent."
+          },
+          "model": {
+            "type": "string",
+            "description": "LLM model identifier (use 'local/' prefix for local models)."
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Optional temperature override for this agent."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "How many identical agents to spawn with this configuration."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "constraints": {
       "type": "object",
-      "description": "Configuration for builder agents that generate code and artifacts",
-      "required": ["agents"],
+      "description": "Global constraints applied to the entire run.",
       "properties": {
-        "overarching_team_goal": {
+        "max_cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 10.0,
+          "description": "Maximum total cost (USD) for all agents combined."
+        },
+        "max_runtime_min": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Maximum total runtime (minutes) for all agents combined."
+        },
+        "target_directory": {
           "type": "string",
-          "description": "High-level objective shared by **all** builder agents. Each agent should align its individual goal with this team goal."
-        },
-        "agents": {
-          "type": "object",
-          "description": "Builder agent pool configuration",
-          "required": ["count"],
-          "properties": {
-            "count": {
-              "type": "integer",
-              "description": "Number of builder agents to instantiate",
-              "minimum": 1,
-              "default": 1
-            },
-            "models": {
-              "type": "array",
-              "description": "List of models and how many builder agents to launch for each. Allows heterogeneous agent pools (e.g. GPT-4 for complex tasks and GPT-3.5 for lightweight ones).",
-              "items": {
-                "type": "object",
-                "required": ["name", "count"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Model identifier. Use prefix local/ for locally-hosted models, for example local/my-ggml-model."
-                  },
-                  "count": {
-                    "type": "integer",
-                    "description": "How many builder agents should use this model.",
-                    "minimum": 1,
-                    "default": 1
-                  },
-                  "temperature": {
-                    "type": "number",
-                    "description": "Temperature override for this model (optional).",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "individual_agent_goal": {
-                    "type": "string",
-                    "description": "Specific objective for agents using this model. It should **enrich** (but not override) the overarching_team_goal."
-                  }
-                }
-              }
-            },
-            "temperature": {
-              "type": "number",
-              "description": "Temperature setting for LLM generation",
-              "minimum": 0,
-              "maximum": 1,
-              "default": 0.7
-            }
-          }
-        },
-        "constraints": {
-          "type": "object",
-          "description": "Additional constraints for the build process",
-          "properties": {
-            "allowed_languages": {
-              "type": "array",
-              "description": "Programming languages allowed for code generation",
-              "items": {
-                "type": "string"
-              }
-            },
-            "max_cost_usd": {
-              "type": "number",
-              "description": "Maximum cost in USD for all builder agents combined",
-              "minimum": 0,
-              "default": 10.0
-            },
-            "max_runtime_min": {
-              "type": "integer",
-              "description": "Maximum runtime in minutes for builder agents",
-              "minimum": 1,
-              "default": 60
-            },
-            "target_directory": {
-              "type": "string",
-              "description": "Directory where generated files will be stored",
-              "default": "./output"
-            }
-          }
+          "default": "./output",
+          "description": "Directory where generated files or artifacts will be stored."
         }
       }
     },
-    "verify": {
-      "type": "object",
-      "description": "Configuration for verifier agents that test and validate the built artifacts",
-      "properties": {
-        "strategy": {
-          "type": "string",
-          "description": "Strategy for running verification",
-          "enum": ["sequential", "parallel", "gated"],
-          "default": "sequential"
-        },
-        "agents": {
-          "type": "object",
-          "description": "Verifier agent pool configuration",
-          "properties": {
-            "count": {
-              "type": "integer",
-              "description": "Number of verifier agents to instantiate",
-              "minimum": 0,
-              "default": 1
-            },
-            "models": {
-              "type": "array",
-              "description": "List of models and how many verifier agents to launch for each. Allows heterogeneous verifier pools (e.g. a strict security model plus a fast doc-review model). Use the prefix `local/` for locally-hosted models (e.g. `local/my-secure-model`). If omitted, the legacy single-model keys (`model`, `count`, `temperature`) are used.",
-              "items": {
-                "type": "object",
-                "required": ["name", "count"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Model identifier. Use prefix local/ for locally-hosted models, for example local/my-ggml-model."
-                  },
-                  "count": {
-                    "type": "integer",
-                    "description": "How many verifier agents should use this model.",
-                    "minimum": 1,
-                    "default": 1
-                  },
-                  "temperature": {
-                    "type": "number",
-                    "description": "Temperature override for this verifier model (optional).",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "individual_agent_goal": {
-                    "type": "string",
-                    "description": "Specific objective for verifier agents using this model. The goal will be injected into the verifier’s base system prompt and should complement (not override) the global verification strategy."
-                  }
-                }
-              }
-            },
-            "model": {
-              "type": "string",
-              "description": "LLM model to use for verifier agents. Use the prefix `local/` to reference a locally-hosted model.",
-              "default": "openai/gpt-4-turbo-preview"
-            },
-            "temperature": {
-              "type": "number",
-              "description": "Temperature setting for LLM verification",
-              "minimum": 0,
-              "maximum": 1,
-              "default": 0.2
-            },
-            "individual_agent_goal": {
-              "type": "string",
-              "description": "Specific objective for verifier agents. This goal becomes the base system prompt for each verifier agent and should complement the overall verification strategy without overriding global goals."
-            }
-          }
-        }
-      }
-    },
-    "operate": {
-      "type": "object",
-      "description": "Configuration for operator agents that run and maintain the built system",
-      "properties": {
-        "runtime": {
-          "type": "string",
-          "description": "Target runtime environment",
-          "enum": ["docker", "k8s", "local", "aws", "gcp", "azure"],
-          "default": "local"
-        },
-        "operator_agents": {
-          "type": "object",
-          "description": "Operator agent pool configuration",
-          "properties": {
-            "count": {
-              "type": "integer",
-              "description": "Number of operator agents to instantiate",
-              "minimum": 0,
-              "default": 1
-            },
-            "model": {
-              "type": "string",
-              "description": "LLM model to use for operator agents. Use the prefix `local/` to reference a locally-hosted model.",
-              "default": "openai/gpt-4-turbo-preview"
-            }
-          }
-        },
-        "monitoring": {
-          "type": "object",
-          "description": "Monitoring configuration for operators",
-          "properties": {
-            "interval_sec": {
-              "type": "integer",
-              "description": "Monitoring interval in seconds",
-              "minimum": 1,
-              "default": 60
-            },
-            "metrics": {
-              "type": "array",
-              "description": "List of metrics to monitor",
-              "items": {
-                "type": "string"
-              }
-            },
-            "alert_threshold": {
-              "type": "object",
-              "description": "Thresholds for alerting",
-              "additionalProperties": {
-                "type": "number"
-              }
-            }
-          }
-        },
-        "deployment": {
-          "type": "object",
-          "description": "Deployment configuration",
-          "properties": {
-            "strategy": {
-              "type": "string",
-              "description": "Deployment strategy",
-              "enum": ["rolling", "blue-green", "canary"],
-              "default": "rolling"
-            },
-            "auto_rollback": {
-              "type": "boolean",
-              "description": "Whether to automatically rollback failed deployments",
-              "default": true
-            }
-          }
-        }
-      }
-    },
+    
     "logging": {
       "type": "object",
       "description": "Logging configuration for the toolkit",
@@ -328,28 +157,6 @@
               }
             }
           ]
-        }
-      }
-    },
-    "local_models": {
-      "type": "array",
-      "description": "Definitions of local models that can be referenced in agent configurations with the prefix 'local/'.",
-      "items": {
-        "type": "object",
-        "required": ["name", "path"],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Identifier used in the config to reference this local model (e.g. 'my-ggml-model')."
-          },
-          "path": {
-            "type": "string",
-            "description": "Filesystem path or endpoint URL where the local model is hosted."
-          },
-          "api_type": {
-            "type": "string",
-            "description": "Optional hint for the client on how to call this model (e.g. 'ggml', 'vllm', 'ollama')."
-          }
         }
       }
     }

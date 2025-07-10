@@ -1,73 +1,78 @@
 # Multi-Modal Verification Configuration for a Simple TODO App
-# This configuration sets up specialized builder and verifier agents
+# This configuration sets up specialized builder and operator agents
 # to create and verify a simple in-memory TODO application.
 
 project:
   name: simple-todo-app
-  description: >
-    A simple TODO application with an in-memory backend, a clean frontend,
-    and comprehensive documentation, built and verified by specialized agents.
 
-# Builder agents configuration with specialized roles
-build:
-  # High-level objective shared by all builder agents
-  overarching_team_goal: >
-    Create a simple, functional TODO application with an in-memory backend,
-    a clean user interface, and clear startup instructions. The app should
-    be simple but functional, with proper error handling and a clean user interface.
-  
-  agents:
-    count: 3  # Total number of builder agents
-    model: openai/gpt-4o      # Single model for all builders (simplified schema)
-    temperature: 0.3          # Shared temperature
-    individual_agent_goal: >
-      Three-agent team:
-        • Agent 1 – backend: implement an in-memory Flask API with CRUD routes.
-        • Agent 2 – frontend: build a simple React UI that talks to the API.
-        • Agent 3 – docs/start-up: create a clear README with install & run
-          instructions plus any helper startup scripts.
-  
-  constraints:
-    max_cost_usd: 10.0
-    max_runtime_min: 30
-    allowed_languages:
-      - python
-      - javascript
-      - html
-      - css
-      - markdown
-    target_directory: ./todo-app-output
-    dependencies:
-      python:
-        - flask>=2.0.0
-      javascript:
-        - react>=18.0.0
-        - axios>=1.0.0
+# High-level objective shared by ALL agents
+overarching_team_goal: >
+  Create a simple, functional TODO application with an in-memory backend,
+  a clean user interface, and clear startup instructions. The app should
+  be simple but functional, with proper error handling and a clean user
+  interface.
 
-# Verifier agents configuration with specialized roles
-verify:
-  strategy: parallel  # Run verification in parallel with building
-  agents:
-    count: 3        # Total verifier agents
-    model: openai/gpt-4o   # Single model for all verifiers (simplified schema)
+# Builder and operator agents
+agents:
+  # Builder 1 – backend
+  - type: builder
+    model: google/gemini-1.5-pro-latest
+    count: 1
+    temperature: 0.3
+    goal: >
+      Implement an in-memory Flask API with CRUD routes.
+
+  # Builder 2 – frontend
+  - type: builder
+    model: google/gemini-1.5-pro-latest
+    count: 1
+    temperature: 0.3
+    goal: >
+      Build a simple React UI that talks to the API.
+
+  # Builder 3 – documentation / start-up
+  - type: builder
+    model: google/gemini-1.5-pro-latest
+    count: 1
+    temperature: 0.3
+    goal: >
+      Create a clear README with install & run instructions plus any helper
+      startup scripts.
+
+  # Operator 1 – end-to-end tester
+  - type: operator
+    model: google/gemini-1.5-pro-latest
+    count: 1
     temperature: 0.15
-    individual_agent_goal: >
-      Three-agent verification team:
-        • Verifier 1 – end-to-end tester: ensure backend and frontend integrate
-          flawlessly; validate CRUD functionality and error handling.
-        • Verifier 2 – documentation tester: execute the README instructions
-          on a clean environment and confirm the app starts and operates as
-          documented. Report any ambiguities or missing steps.
-        • Verifier 3 – route tester: start the app locally and perform basic
-          HTTP GET requests to key routes (/, /api/todos). Confirm each route
-          returns expected HTML or JSON with status 200, not error pages or
-          stack traces.
+    goal: >
+      Ensure backend and frontend integrate flawlessly; validate CRUD
+      functionality and error handling.
 
-# Operator agents configuration (disabled for this workflow)
-operate:
-  runtime: local        # Required field but not used when count = 0
-  operator_agents:
-    count: 0            # Disable operator agents
+  # Operator 2 – documentation tester
+  - type: operator
+    model: google/gemini-1.5-pro-latest
+    count: 1
+    temperature: 0.15
+    goal: >
+      Execute the README instructions on a clean environment and confirm
+      the app starts and operates as documented. Report any ambiguities or
+      missing steps.
+
+  # Operator 3 – route tester
+  - type: operator
+    model: google/gemini-1.5-pro-latest
+    count: 1
+    temperature: 0.15
+    goal: >
+      Start the app locally and perform basic HTTP GET requests to key
+      routes (/, /api/todos). Confirm each route returns expected HTML or
+      JSON with status 200, not error pages or stack traces.
+
+# Global constraints
+constraints:
+  max_cost_usd: 10.0
+  max_runtime_min: 30
+  target_directory: ./todo-app-output
 
 # Logging configuration for comprehensive debugging
 logging:
@@ -79,12 +84,3 @@ logging:
     rotation:
       max_size_mb: 10
       max_files: 3
-  additional_sinks:
-    - type: stdout
-      format: pretty  # Human-readable format for console output
-
-# Event tracking configuration
-events:
-  track_consumption: true
-  history_limit: 10000
-  buffer_size: 1000

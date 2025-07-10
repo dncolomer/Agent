@@ -336,6 +336,60 @@ class AgentFactory:
         self.resource_tracker = resource_tracker
         self.logger = logger
         
+    async def _build_manifest(self, config: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Return a manifest describing every agent that will be launched."""
+        manifest = []
+        idx_counter: Dict[str, int] = {"builder": 0, "operator": 0}
+        for entry in config.get("agents", []):
+            count = entry.get("count", 1)
+            for _ in range(count):
+                idx_counter[entry["type"]] += 1
+                agent_id = f"{entry['type']}-{idx_counter[entry['type']]}"
+                manifest.append(
+                    {
+                        "agent_id": agent_id,
+                        "type": entry["type"],
+                        "goal": entry.get("goal", ""),
+                    }
+                )
+        return manifest
+
+    async def create_agents(self, config: Dict[str, Any], run_id: str) -> List[BaseAgent]:
+        """
+        Create all agents (builders and operators) defined in the unified
+        ``agents`` list of the configuration.
+        """
+        agents_cfg = config.get("agents", [])
+        if not agents_cfg:
+            self.logger.warning("No agents defined in configuration")
+            return []
+
+        manifest = await self._build_manifest(config)
+        manifest_iter = iter(manifest)  # to pop IDs in deterministic order
+
+        created: List[BaseAgent] = []
+        for entry in agents_cfg:
+            # Determine concrete agent class
+            agent_cls = BuilderAgent if entry["type"] == "builder" else OperatorAgent
+            count = entry.get("count", 1)
+            for _ in range(count):
+                m = next(manifest_iter)
+                cfg_copy = dict(config)
+                cfg_copy["run_id"] = run_id
+                agent = agent_cls(
+                    agent_id=m["agent_id"],
+                    config=cfg_copy,
+                    event_bus=self.event_bus,
+                    logger=self.logger,
+                    agent_manifest=manifest,  # <- requires BaseAgent to accept
+                )
+                created.append(agent)
+
+        return created
+
+    # ------------------------------------------------------------------ #
+    # Legacy creators kept (unused) for backward compatibility           #
+    # ------------------------------------------------------------------ #
     async def create_builder_agents(self, config: Dict[str, Any], run_id: str) -> List[BuilderAgent]:
         """Create builder agents based on configuration."""
         builder_cfg = config.get("build", {}).get("agents", {})
