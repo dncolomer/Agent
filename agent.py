@@ -106,9 +106,9 @@ class Agent(BaseAgent):
             {}
         )
         self.goal = self.agent_entry.get("goal", "No specific goal defined")
-        # Default to env DEFAULT_MODEL or OpenRouter's specific model selector
-        # Don't use "auto" as it might not be recognized by OpenRouter
-        self.model = self.agent_entry.get("model") or os.getenv("DEFAULT_MODEL", "openai/gpt-3.5-turbo")
+        # Default to env DEFAULT_MODEL or OpenRouter's **auto** selector
+        # Must be prefixed with ``openrouter/`` so the API recognises it.
+        self.model = self.agent_entry.get("model") or os.getenv("DEFAULT_MODEL", "openrouter/auto")
         self.temperature = self.agent_entry.get("temperature", 0.7)
         
         # Task management

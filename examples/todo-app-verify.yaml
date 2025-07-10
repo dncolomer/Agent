@@ -8,15 +8,13 @@ project:
 # High-level objective shared by ALL agents
 overarching_team_goal: >
   Create a simple, functional TODO application with an in-memory backend,
-  a clean user interface, and clear startup instructions. The app should
-  be simple but functional, with proper error handling and a clean user
-  interface.
+  a clean user interface. Make sure the app support the following features: Create a TODO, Edit a TODO, Delete a TODO. Do not include any other features
 
 # Builder and operator agents
 agents:
   # Builder 1 – backend
   - type: builder
-    model: auto
+    model: openrouter/auto
     count: 1
     temperature: 0.3
     goal: >
@@ -24,49 +22,20 @@ agents:
 
   # Builder 2 – frontend
   - type: builder
-    model: auto
+    model: openrouter/auto
     count: 1
     temperature: 0.3
     goal: >
       Build a simple React UI that talks to the API.
 
-  # Builder 3 – documentation / start-up
-  - type: builder
-    model: auto
-    count: 1
-    temperature: 0.3
-    goal: >
-      Create a clear README with install & run instructions plus any helper
-      startup scripts.
-
   # Operator 1 – end-to-end tester
   - type: operator
-    model: auto
+    model: openrouter/auto
     count: 1
     temperature: 0.15
     goal: >
       Ensure backend and frontend integrate flawlessly; validate CRUD
-      functionality and error handling.
-
-  # Operator 2 – documentation tester
-  - type: operator
-    model: auto
-    count: 1
-    temperature: 0.15
-    goal: >
-      Execute the README instructions on a clean environment and confirm
-      the app starts and operates as documented. Report any ambiguities or
-      missing steps.
-
-  # Operator 3 – route tester
-  - type: operator
-    model: auto
-    count: 1
-    temperature: 0.15
-    goal: >
-      Start the app locally and perform basic HTTP GET requests to key
-      routes (/, /api/todos). Confirm each route returns expected HTML or
-      JSON with status 200, not error pages or stack traces.
+      functionality. Is enough to validate it statically by looking at the code.
 
 # Global constraints
 constraints:
@@ -84,3 +53,7 @@ logging:
     rotation:
       max_size_mb: 10
       max_files: 3
+  # Duplicate logs to console as well
+  additional_sinks:
+    - type: stdout
+      format: json     # keep structured output on console too
