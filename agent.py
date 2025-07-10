@@ -592,12 +592,20 @@ Target directory: {self.target_directory}
         
         # Look for file paths and content in the response
         # This is a simple implementation and could be improved
-        
-        # Look for markdown code blocks with file paths
-        file_blocks = re.findall(r'```(?:[\w-]+)?\s*(?:File|PATH|FILEPATH):\s*([^\n]+)\s*\n(.*?)```', response, re.DOTALL)
+
+        # -------------------------- #
+        # 1. Markdown code blocks    #
+        # -------------------------- #
+        file_blocks = re.findall(
+            r'```(?:[\w-]+)?\s*(?:file|path|filepath|file path):\s*([^\n]+)\s*\n(.*?)```',
+            response,
+            re.IGNORECASE | re.DOTALL,
+        )
         for path, content in file_blocks:
             # Clean up path
-            path = path.strip()
+            path = os.path.normpath(path.strip().strip("`").strip("\"").strip("'"))
+            if not self._is_valid_path(path):
+                continue
             # Make path relative to target directory
             if not path.startswith(self.target_directory):
                 path = os.path.join(self.target_directory, path)
@@ -618,14 +626,16 @@ Target directory: {self.target_directory}
         
         # If no file blocks found, look for other patterns
         if not operations:
-            # Look for sections with file paths and content
+            # --------------------------- #
+            # 2. Heading-style sections   #
+            # --------------------------- #
             sections = re.split(r'\n#{1,3}\s+', response)
             for section in sections:
                 path_match = re.search(r'^([^\n]+)\s*\n', section)
                 if path_match:
                     path = path_match.group(1).strip()
                     # Check if it looks like a file path
-                    if '/' in path or '.' in path:
+                    if self._is_valid_path(path):
                         # Make path relative to target directory
                         if not path.startswith(self.target_directory):
                             path = os.path.join(self.target_directory, path)
@@ -658,6 +668,47 @@ Target directory: {self.target_directory}
             })
             
         return operations
+
+    # ------------------------------------------------------------------ #
+    # Helper: path validation                                            #
+    # ------------------------------------------------------------------ #
+    def _is_valid_path(self, path: str) -> bool:
+        """
+        Heuristic check whether the extracted *path* looks like a real file
+        path versus a descriptive label produced by the LLM (e.g. ``File 1:``
+        or ``1. File Path``).  This prevents creating junk files such as
+        ``"File: `" or ``"1. File:"`` seen in earlier runs.
+
+        The rules are intentionally simple – they cover the common formats we
+        expect from the model while filtering out obvious non-paths.
+        """
+        if not path:
+            return False
+
+        p = path.strip()
+
+        # Reject purely numeric or bullet labels like "1." or "2"
+        if re.fullmatch(r"\d+\.?", p):
+            return False
+
+        # Reject lines that start with common labels (case-insensitive)
+        bad_prefixes = [
+            "file", "file:", "file path", "file path:", "file to modify", "file to modify:"
+        ]
+        if any(p.lower().startswith(bp) for bp in bad_prefixes):
+            return False
+
+        # Must contain a path separator OR an extension
+        has_sep = ("/" in p) or ("\\" in p)
+        has_ext = os.path.splitext(p)[1] != ""
+        if not (has_sep or has_ext):
+            return False
+
+        # Finally, exclude pathological names with whitespace only
+        if p in [".", ".."]:
+            return False
+
+        return True
     
     def _parse_test_operations(self, response: str) -> List[Dict[str, Any]]:
         """
