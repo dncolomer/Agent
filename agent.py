@@ -191,6 +191,26 @@ class Agent(BaseAgent):
                 json=data,
                 timeout=30
             )
+            # ------------------------------------------------------------------ #
+            # Helpful handling for auth failures                                 #
+            # ------------------------------------------------------------------ #
+            if resp.status_code == 401:
+                # Give the user a direct, actionable message.
+                helpful_msg = (
+                    "OpenRouter API returned 401 Unauthorized. "
+                    "Please verify that your OPENROUTER_API_KEY environment "
+                    "variable is set correctly, has not expired, and has "
+                    "sufficient quota."
+                )
+                # Log raw body for debugging (at debug level only).
+                self.logger.debug(
+                    f"OpenRouter 401 response body: {resp.text}",
+                    extra={"agent_id": self.agent_id},
+                )
+                self.logger.error(helpful_msg, extra={"agent_id": self.agent_id})
+                # Raise an explicit error so the orchestrator halts early.
+                raise RuntimeError(helpful_msg)
+
             resp.raise_for_status()
             payload = resp.json()
             return payload["choices"][0]["message"]["content"]
